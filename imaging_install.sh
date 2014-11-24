@@ -6,6 +6,14 @@
 ###2)It doesn't fetch the CIVET stuff   TODO:Get the CIVET stuff from somewhere and place it in h
 ###3)It doesn't change the config.xml
 
+
+#Create a temporary log for installation and delete it on completion 
+#@TODO make sure that /tmp is writable
+LOGFILE="/tmp/$(basename $0).$$.tmp"
+touch $LOGFILE
+trap "rm  $LOGFILE" EXIT
+ 
+
 ## First, check that all required modules are installed.
 ## Check if cpan module installed
 CPANCHECK=`which cpan`
@@ -87,7 +95,7 @@ echo
   sudo -S su $USER -c "mkdir -p /data/$PROJ/data/jiv"            ## holds JIVs used for JIV viewer
   sudo -S su $USER -c "mkdir -p /data/$PROJ/data/assembly" ## holds the MINC files
   sudo -S su $USER -c "mkdir -p /data/$PROJ/data/batch_output"  ##contains the result of the SGE (queue
-  sudo -S su $USER -c "mkdir -p $mridir/.loris_mri"
+  sudo -S su $USER -c "mkdir -p $mridir/dicom-archive/.loris_mri"
 echo
 #######################################################################################
  ###############incoming directory using sites########################################
@@ -121,8 +129,25 @@ echo
 ####################################################################################
 ######################Add the proper Apache group user #############################
 ####################################################################################
-sudo chgrp www-data -R /data/$PROJ/data/
-sudo chgrp www-data -R /data/incoming/
+
+
+if egrep ^www-data: /etc/group > $LOGFILE 2>&1;
+then 
+    group=www-data
+elif egrep ^www: /etc/group  > $LOGFILE 2>&1;
+then
+    group=www
+elif egrep -e ^apache: /etc/group  > $LOGFILE 2>&1;
+then
+    group=apache
+else
+    read -p "Cannot find the apache group name for your installation. Please provide? " group
+fi
+
+# Setting group permissions 
+sudo chgrp $group -R /data/$PROJ/data/
+sudo chgrp $group -R /data/incoming/
+
 
 echo
 ######################################################################################
@@ -133,8 +158,7 @@ echo "Creating MRI config file"
 cp $mridir/dicom-archive/profileTemplate $mridir/dicom-archive/.loris_mri/$prodfilename
 sudo chmod 640 $mridir/dicom-archive/.loris_mri/$prodfilename
 
-#variable  $projdir should be declared from previous pull requests addRelativeInInstallationScript
-sed -e "s#project#$PROJ#g" -e "s#/PATH/TO/DATA/location#$projdir/data#g" -e "s#yourname\\\@example.com#$email#g" -e "s#/PATH/TO/get_dicom_info.pl#$mridir/dicom-archive/get_dicom_info.pl#g"  -e "s#DBNAME#$mysqldb#g" -e "s#DBUSER#$mysqluser#g" -e "s#DBPASS#$mysqlpass#g" -e "s#DBHOST#$mysqlhost#g" -e "s#/PATH/TO/dicomlib/#$projdir/data/tarchive#g" $mridir/dicom-archive/profileTemplate > $mridir/dicom-archive/.loris_mri/$prodfilename
+sed -e "s#project#$PROJ#g" -e "s#/PATH/TO/DATA/location#/data/$PROJ/data#g" -e "s#yourname\\\@example.com#$email#g" -e "s#/PATH/TO/get_dicom_info.pl#$mridir/dicom-archive/get_dicom_info.pl#g"  -e "s#DBNAME#$mysqldb#g" -e "s#DBUSER#$mysqluser#g" -e "s#DBPASS#$mysqlpass#g" -e "s#DBHOST#$mysqlhost#g" -e "s#/PATH/TO/dicomlib/#/data/$PROJ/data/tarchive#g" $mridir/dicom-archive/profileTemplate > $mridir/dicom-archive/.loris_mri/$prodfilename
 echo "config file is located at $mridir/dicom-archive/.loris_mri/$prodfilename"
 echo
 
