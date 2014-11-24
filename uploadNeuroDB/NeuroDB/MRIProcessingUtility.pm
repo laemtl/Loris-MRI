@@ -232,9 +232,8 @@ sub determinePSC {
         $tarchiveInfo->{$Settings::lookupCenterNameUsing},
         $this->{dbhr}
     );
-    my $psc = $center_name;
     if ($to_log) {
-        if (!$psc) {
+        if (!$center_name) {
             $this->{LOG}->print(
                 "\nERROR: No center found for this candidate \n\n"
             );
@@ -246,7 +245,7 @@ sub determinePSC {
             " : $centerID\n"
         );
     }
-    return ($psc,$center_name, $centerID);
+    return ($center_name, $centerID);
 }
 
 ################################################################
@@ -715,7 +714,7 @@ sub get_mincs {
     my @files_list;
     foreach my $file (@files) {
         next unless $file =~ /\.mnc(\.gz)?$/;
-        my $cmd= "Mincinfo -quiet -tab -file -date $this->{TmpDir}/$file";
+        my $cmd= "Mincinfo_wrapper -quiet -tab -file -date $this->{TmpDir}/$file";
         push @files_list, `$cmd`;
     }
     open SORTER, "|sort -nk2 | cut -f1 > $this->{TmpDir}/sortlist";
@@ -1029,7 +1028,8 @@ sub validateCandidate {
         $CandMismatchError= 'PSCID does not exist';
         return $CandMismatchError;
     } 
-
+    
+    
     ############################################################
     ################ No Checking if the subject is Phantom #####
     ############################################################
@@ -1040,6 +1040,22 @@ sub validateCandidate {
         $CandMismatchError = undef;
         return $CandMismatchError;
     }
+
+    ############################################################
+    ################ Check if visitLabel exists #####################
+    ############################################################
+
+    $query = "SELECT Visit_label FROM Visit_Windows WHERE BINARY Visit_label=?";
+    $sth =  ${$this->{'dbhr'}}->prepare($query);
+    $sth->execute($subjectIDsref->{'visitLabel'});
+    if (($sth->rows == 0) && (!$subjectIDsref->{'createVisitLabel'})) {
+        print LOG  "\n\n => No Visit label";
+        $CandMismatchError= 'Visit label does not exist';
+        return $CandMismatchError;
+    } elsif (($sth->rows == 0) && ($subjectIDsref->{'createVisitLabel'})) {
+        print LOG  "\n\n => Will create visit label $subjectIDsref->{'visitLabel'}";
+    } 
+
    return $CandMismatchError;
 }
 

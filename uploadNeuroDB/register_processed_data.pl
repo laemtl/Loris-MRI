@@ -380,13 +380,13 @@ sub copy_file {
     my %subjectIDs  =   %$subjectIDsref;
 
     # figure out where to put the files
-    my $dir =   which_directory($subjectIDsref);
+    my $dir         =   &which_directory($subjectIDsref);
     `mkdir -p -m 755 $dir/processed/$sourcePipeline`;
 
     # figure out what to call files
-    my @exts    =   split(/\./, basename($$filename));
+    my @exts        =   split(/\./, basename($$filename));
     shift @exts;
-    my $extension =   join('.', @exts);
+    my $extension   =   join('.', @exts);
 
     my $concat  =   "";
     $concat     =   '_concat' if $filename =~ /_concat/;
@@ -415,6 +415,8 @@ sub copy_file {
 
     return ($new_name);
 }
+
+
 
 =pod
 Determines where the mincs will go...
