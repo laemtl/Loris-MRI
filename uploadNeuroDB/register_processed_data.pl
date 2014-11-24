@@ -377,7 +377,7 @@ sub copy_file {
     my ($filename, $subjectIDsref, $scan_type, $fileref)    =   @_;
 
     my ($new_name, $version);
-    my $basename    =   &getSourceFilename($$fileref->{'fileData'}{'SourceFileID'});
+    my %subjectIDs  =   %$subjectIDsref;
 
     # figure out where to put the files
     my $dir         =   &which_directory($subjectIDsref);
@@ -394,13 +394,13 @@ sub copy_file {
     my $new_dir =   "$dir/processed/$sourcePipeline";
 
     $version    =   1;
-    $new_name   =   $basename . "_" . $scan_type . "_" . sprintf("%03d",$version) . $concat . ".$extension";
+    $new_name   =   $prefix."_".$subjectIDs{'CandID'}."_".$subjectIDs{'visitLabel'}."_".$scan_type."_".sprintf("%03d",$version).$concat.".$extension";
     $new_name   =~  s/ //;
     $new_name   =~  s/__+/_/g;
 
     while   (-e "$new_dir/$new_name") {
         $version    =   $version + 1;
-        $new_name   =   $basename . "_" . $scan_type . "_" . sprintf("%03d",$version) . $concat . ".$extension";
+        $new_name   =   $prefix."_".$subjectIDs{'CandID'}."_".$subjectIDs{'visitLabel'}."_".$scan_type."_".sprintf("%03d",$version).$concat.".$extension";
         $new_name   =~  s/ //;
         $new_name   =~  s/__+/_/g;
     }
@@ -414,36 +414,6 @@ sub copy_file {
     $$filename  =   $new_name;
 
     return ($new_name);
-}
-
-
-
-=pod
-Grep source file name from the database using SourceFileID.
-Input:  $sourceFileID
-Output: $filename
-=cut
-sub getSourceFilename {
-    my ($sourceFileID) = @_;
-
-    my $query   = "SELECT File " .
-                  "FROM files "  .
-                  "WHERE FileID=?";
-    my $sth     = $dbh->prepare($query);
-    $sth->execute($sourceFileID);
-
-    my $filename;
-    if($sth->rows > 0) {
-        my $row     =   $sth->fetchrow_hashref();
-        $filename   =   $row->{'File'};
-    }else{
-        return  undef;
-    }
-
-    my $basename    = basename($filename);
-    $basename       =~ s/\.mnc$//i;
-
-    return ($basename);
 }
 
 

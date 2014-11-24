@@ -19,7 +19,7 @@ my $tarchive    = undef;
 
 my @opt_table = (
                  ["Basic options","section"],
-                 ["-profile"    ,"string", 1, \$profile, "name of config file in ~/.neurodb."],
+                 ["-profile"    ,"string", 1, \$profile, "name of config file in $ENV{LORIS_CONFIG}/.loris_mri."],
 
                  ["Advanced options","section"],
                  ["-pattern"    ,"string", 1, \$pattern, "Pattern to use to grep DICOM files (typically, the series description)."],
@@ -39,8 +39,8 @@ USAGE
 &Getopt::Tabular::GetOptions(\@opt_table, \@ARGV) || exit 1;
 
 # input option error checking
-{ package Settings; do "$ENV{HOME}/.neurodb/$profile" }
-if ($profile && !defined @Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{HOME}/.neurodb/ \n\n"; exit 33; }
+{ package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
+if ($profile && !defined @Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri \n\n"; exit 33; }
 if(!$tarchive || !$pattern || !$profile) { print $Help; print "$Usage\n\tERROR: You must specify a valid tarchive, a pattern to grep for in the DICOMs and an existing profile.\n\n";  exit 33;  }
 
 # These settings are in a config file (profile)
@@ -50,11 +50,11 @@ my $mail_user           = $Settings::mail_user;
 my $template            = "TarGrep-$hour-$min-XXXXXX"; # for tempdir
 
 # Check that tarchive file exists
+$tarchive               =~ s/$tarchiveLibraryDir\///i;
 unless (-e "$tarchiveLibraryDir/$tarchive") {
     print "\nERROR: Could not find archive $tarchive. \nPlease, make sure the path to the archive is correct. Upload will exit now.\n\n\n";
     exit 33;
 }
-$tarchive           =~ s/$tarchiveLibraryDir\///i;
 my $tarchive_path   = $tarchiveLibraryDir . "/" . $tarchive;
 
 # create the temp dir
