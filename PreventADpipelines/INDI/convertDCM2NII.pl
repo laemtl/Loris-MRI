@@ -83,7 +83,7 @@ foreach my $tarchive (@tars) {
     # Step 9: Move filenames according to INDI data organization
     &moveNiiFiles($files, $session_out_dir);
 
-#    `rm -r $TmpDir`;
+    `rm -r $TmpDir`;
 }
 
 exit 0;
