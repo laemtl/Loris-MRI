@@ -1040,6 +1040,9 @@ sub compute_hash {
     $ctx->add($file->getParameter('processing:intergradient_rejected')); 
     # processing:intergradient_rejected minc field is the only field
     # separating a noRegQCedDTI and a QCedDTI minc file.
+    $ctx->add($file->getParameter('processing:vibration_rejected'));
+    # processing:vibration_rejected minc field is the only field
+    # separating a noRegQCedDTI from FinalnoRegQCedDTI minc file.
     }
 
     # finally generate the hex digest
