@@ -168,3 +168,51 @@ sub getQCdate {
 }
 
 
+
+
+
+=pod
+
+=cut
+sub createFeedbackRefs {
+    my ($qcnotes) = @_;
+
+    my @qc_labels = ["FileType",
+                     "Color_FA",
+                     "Red",      
+                     "Green",
+                     "Blue",      
+                     "Entropy_rating",      
+                     "Motion",         
+                     "Motion_Slice_Wise",   
+                     "Motion_Gradient_Wise",
+                     "Motion_comment",      
+                     "Intensity", 
+                     "Checkerboard", 
+                     "Horizontal_striping", 
+                     "Diagonal_striping", 
+                     "High_intensity_in_acquisition_direction",
+                     "Signal_loss",         
+                     "Intensity_comment",
+                     "Too_few_remaining_gradients",   
+                     "No_b0_left",    
+                     "No_gradient_info",
+                     "Incorrect_diffusion_directions",    
+                     "Duplicate_series",  
+                     "Coverage_comment",  
+                     "large_AP_wrap",
+                     "medium_AP_wrap",
+                     "small_AP_wrapi", 
+                     "tight_LR_brain",    
+                     "base_cerebellum_cut",   
+                     "top_brain_cut", 
+                     "QC_status", 
+                     "Caveat"];
+    
+    # Read qc-notes file into an array @fileTypes with one line per file type
+    open my $file, '<', $qcnotes or die $!;
+    my @fileTypes = <$file>;
+    close $file;
+
+
+}

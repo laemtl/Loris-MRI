@@ -89,6 +89,8 @@ my $QCedfiles   = &DTI::getFilesList($DTIvisu_subdir, 'Final');
 my ($FinalQCedDTI)         = grep { $_ =~ /FinalQCedDTI/}                  @$QCedfiles;
 my ($FinalnoRegQCedDTI)    = grep { $_ =~ /FinalnoRegQCedDTI_\d\d\d\.mnc/} @$QCedfiles;
 my ($FinalnoRegQCedDTIrgb) = grep { $_ =~ /-eddy-reg-to-t1_rgb/}           @$QCedfiles;
+# Read content of DTI visual QC directory and extract qc-notes
+my ($qc_notes)  = &DTI::getFilesList($DTIvisu_subdir, 'qc-notes');
 
 
 unless ($FinalQCedDTI && $FinalnoRegQCedDTI && $FinalnoRegQCedDTIrgb) {
@@ -100,7 +102,7 @@ unless ($FinalQCedDTI && $FinalnoRegQCedDTI && $FinalnoRegQCedDTIrgb) {
     #######################
     ####### Step 2: #######  Register FinalQCedDTI
     #######################
-my ($registeredFinalQCedDTI) = &register_file($FinalQCedDTI, $DTIvisu_subdir, $dbh);
+my ($registeredFinalQCedDTI, $QCedDTIname) = &register_file($FinalQCedDTI, $DTIvisu_subdir, $dbh);
 unless ($registeredFinalQCedDTI) {
     print LOG "\nERROR:\n\t$FinalQCedDTI was not inserted into the database";
     exit;
@@ -109,7 +111,7 @@ unless ($registeredFinalQCedDTI) {
     #######################
     ####### Step 3: #######  Register FinalnoRegQCedDTI
     #######################
-my ($registeredFinalnoRegQCedDTI, $sourceName) = &register_file($FinalnoRegQCedDTI, $DTIvisu_subdir, $dbh);
+my ($registeredFinalnoRegQCedDTI, $noRegQCedDTIname, $sourceName) = &register_file($FinalnoRegQCedDTI, $DTIvisu_subdir, $dbh);
 unless ($registeredFinalnoRegQCedDTI) {
     print LOG "\nERROR:\n\t$FinalnoRegQCedDTI was not inserted into the database";
     exit;
@@ -118,11 +120,25 @@ unless ($registeredFinalnoRegQCedDTI) {
     #######################
     ####### Step 4: #######  Register FinalnoRegQCedDTIrgb
     #######################
-my ($registeredFinalnoRegQCedDTIrgb, $sourceName) = &register_file($FinalnoRegQCedDTIrgb, $DTIvisu_subdir, $dbh, $sourceName);
+my ($registeredFinalnoRegQCedDTIrgb, $inputRGBname, $sourceName) = &register_file($FinalnoRegQCedDTIrgb, $DTIvisu_subdir, $dbh, $sourceName);
 unless ($registeredFinalnoRegQCedDTIrgb) {
     print LOG "\nERROR:\n\t$FinalnoRegQCedDTIrgb was not inserted into the database";
     exit;
 }
+
+    #######################
+    ####### Step 5: #######  Register qc_notes
+    #######################
+if ($registeredFinalnoRegQCedDTI && $noRegQCedDTIname) {
+    print LOG "\nInserting feedbacks into the database\n";
+    my ($success) = &insertFeedbacks($noRegQCedDTIname, 
+                                     $registeredFinalnoRegQCedDTI,
+                                     $qcnotes, 
+                                     $dbh
+                                    );
+} else {
+    print LOG "\nERROR: Feedbacks not inserted into the database\n";
+} 
 
     
 exit 0;
@@ -209,8 +225,8 @@ END_MESSAGE
                                                    $outputType,
                                                    $inputFileID
                                                   );
-        return ($registeredMincFile, $sourceName) if ($QCedFile =~ m/FinalnoRegQCedDTI/);
-        return ($registeredMincFile);
+        return ($registeredMincFile, $inputName, $sourceName) if ($QCedFile =~ m/FinalnoRegQCedDTI/);
+        return ($registeredMincFile, $inputName);
     } else {
         print LOG $message;
         return undef;
@@ -316,5 +332,23 @@ sub fetchRegisteredFile {
     }
 
     return  ($registeredFile);
+
+}
+
+
+
+
+=pod
+=cut
+sub insertFeedbacks {
+    my ($noRegQCedDTI, $FinalnoRegQCedDTI, $qcnotes, $dbh) = @_;
+
+    # Get FileIDs
+    my ($noRegQCedDTIFileID)      = &DTIvisu::getFileID($noRegQCedDTI,      $dbh);
+    my ($FinalnoRegQCedDTIFileID) = &DTIvisu::getFileID($FinalnoRegQCedDTI, $dbh);
+    print LOG "\nERROR: could not find fileID of $noRegQCedDTIFileID or $FinalnoRegQCedDTIFileID\n" unless ($noRegQCedDTIFileID && $FinalnoRegQCedDTIFileID);
+
+    # Read qc-notes file
+    my ($feedbackRefs) = &DTIvisu::createFeedbackRefs($qcnotes);
 
 }
