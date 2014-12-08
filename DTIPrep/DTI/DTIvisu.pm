@@ -36,62 +36,6 @@ use MNI::FileUtilities  qw(check_output_dirs);
 
 
 =pod
-Function that will determine output names based on each DTI file dataset and return a hash of DTIref:
-       QCed_file_1 -> Input DTIPrep filename
-                   -> Raw DWI source filename
-                   -> ScanType to be attributed for file to be registered
-                   -> QC_date (equivalent of pipeline date) of the file to be registered
-       QCed_file_2 -> Input DTIPrep filename
-Inputs:  - $DTIs_list: list of visualy QCed files to be registered
-         - $QCoutdir: directory storing the QCed files to be registered
-Outputs: - $DTIrefs: hash containing parameters to use to register QCed files
-=cut
-#sub createDWIQChasref {
-#    my ($QCedfiles, $DTIvisu_subdir) = @_;
-#
-#    my %DTIrefs;
-#    foreach my $QCedFile (@$QCedfiles) {
-#        
-#        # Input DTIPrep filename & FileID
-#        my $inputName     = substr(basename($QCedFile), 0, -4);
-#        if ($QCedFile =~ m/-eddy-reg-to-t1_rgb/) {
-#            $inputName    =~ s/-eddy-reg-to-t1_rgb//g;     
-#        } else {
-#            $inputName    =~ s/Final//g;
-#        }
-#        my ($inputFileID) = &DTIvisu::getFileID($inputName);
-#
-#        #  Raw DWI source filename & FileID
-#        my ($sourceName)  = &DTI::fetch_header_info('processing:sourceFile', 
-#                                                   $QCedFile,
-#                                                   '$3'
-#                                                  );
-#        my ($sourceFileID)= &DTIvisu::getFileID($sourceName); 
-#
-#        # QC_date (equivalent to pipeline date) of the file to be registered
-#        # read this information direclty from the filesystem creation date
-#        my ($QCdate)    = &DTIvisu::getQCdate($QCedFile);  
-#
-#        # ScanType to be attributed for file to be registered
-#        my ($scanType, $coordinateSpace)  = &DTIvisu::getOtherInfo($QCedFile);
-#
-#        # organize info into $DTIrefs
-#        $DTIrefs->{$QCedFile}->{'inputName'}       = $inputName;
-#        $DTIrefs->{$QCedFile}->{'inputFileID'}     = $inputFileID;
-#        $DTIrefs->{$QCedFile}->{'sourceName'}      = $sourceName;
-#        $DTIrefs->{$QCedFile}->{'sourceFileID'}    = $sourceFileID;
-#        $DTIrefs->{$QCedFile}->{'QCdate'}          = $QCdate;
-#        $DTIrefs->{$QCedFile}->{'ScanType'}        = $scanType;
-#        $DTIrefs->{$QCedFile}->{'coordinateSpace'} = $coordinateSpace;
-#    }
-#
-#    return ($DTIrefs);
-#}
-
-
-
-
-=pod
 Grep file's ID from the database.
 Input:  - $fileName: name of the file to look for fileID
 Output: - $fileID: fileID of the file found in the database
@@ -175,44 +119,194 @@ sub getQCdate {
 
 =cut
 sub createFeedbackRefs {
+    my ($qcnotes, $dbh) = @_;
+
+    my $qc_labels = &DTIvisu::createLabelsHash($dbh);
+    
+    my ($noRegQCarr, $FinalnoRegQCarr) = &DTIvisu::readQCnotes($qcnotes);
+    exit unless ($noRegQCarr && $FinalnoRegQCarr);
+
+    my ($qc_info_noRegQChash)      = &DTIvisu::updateLabelsHash($noRegQCarr);
+    my ($qc_info_FinalnoRegQChash) = &DTIvisu::updateLabelsHash($FinalnoRegQCarr);
+
+    return ($qc_info_noRegQChash && $qc_info_FinalnoRegQChash);
+}
+
+
+=pod
+=cut
+sub createLabelsHash {
+    my ($dbh) = @_;
+
+    my %qc_labels;
+    $qc_labels->{0}{'FileType'}           = undef;
+    $qc_labels->{1}{'ParameterType'}      = 'Color_Artifact';
+    $qc_labels->{2}{'PredefinedComment'}  = 'red artifact';
+    $qc_labels->{3}{'PredefinedComment'}  = 'green artifact';
+    $qc_labels->{4}{'PredefinedComment'}  = 'blue artifact';
+    $qc_labels->{5}{'ParameterType'}      = 'Entropy';
+    $qc_labels->{6}{'ParameterType'}      = 'Movement_artifacts_within_scan';
+    $qc_labels->{7}{'PredefinedComment'}  = 'slice wise artifact (DWI ONLY)';
+    $qc_labels->{8}{'PredefinedComment'}  = 'gradient wise artifact (DWI ONLY)';
+    $qc_labels->{9}{'CommentType'}        = 'Movement artifact';
+    $qc_labels->{10}{'ParameterType'}     = 'Intensity_artifact';
+    $qc_labels->{11}{'PredefinedComment'} = 'checkerboard artifact';
+    $qc_labels->{12}{'PredefinedComment'} = 'horizontal intensity striping (Venetian blind effect, DWI ONLY)';
+    $qc_labels->{13}{'PredefinedComment'} = 'diagonal striping (NRRD artifact, DWI ONLY)';
+    $qc_labels->{14}{'PredefinedComment'} = 'high intensity in direction of acquisition';
+    $qc_labels->{15}{'PredefinedComment'} = 'signal loss (dark patches)';
+    $qc_labels->{16}{'CommentType'}       = 'Intensity';
+    $qc_labels->{17}{'PredefinedComment'} = 'Too few remaining gradients (DWI ONLY)';
+    $qc_labels->{18}{'PredefinedComment'} = 'No b0 remaining after DWIPrep (DWI ONLY)';
+    $qc_labels->{19}{'PredefinedComment'} = 'No gradient information available from scanner (DWI ONLY)';
+    $qc_labels->{20}{'PredefinedComment'} = 'Incorrect diffusion direction (DWI ONLY)';
+    $qc_labels->{21}{'PredefinedComment'} = 'Duplicate series';
+    $qc_labels->{22}{'CommentType'}       = 'Coverage';
+    $qc_labels->{23}{'PredefinedComment'} = 'Large AP wrap around, affecting brain';
+    $qc_labels->{24}{'PredefinedComment'} = 'Medium AP wrap around, no affect on brain';
+    $qc_labels->{25}{'PredefinedComment'} = 'Small AP wrap around, no affect on brain';
+    $qc_labels->{26}{'PredefinedComment'} = 'Too tight LR, affecting brain';
+    $qc_labels->{27}{'PredefinedComment'} = 'Base of cerebellum cut off';
+    $qc_labels->{28}{'PredefinedComment'} = 'Top of brain cut off';
+    $qc_labels->{29}{'Files'}             = 'QC_status';
+    $qc_labels->{30}{'Files'}             = 'Caveat';
+
+    foreach my $hashID (keys %$qc_labels) {
+
+        if (exists ($qc_labels->{$hashID}{'PredefinedComment'})) {
+
+            &DTIvisu::getPredefinedCommentID($qc_labels->{$hashID}{'PredefinedComment'}, $hashID, $dbh);
+            exit unless (exists ($qc_labels->{$hashID}{'PredefinedCommentID'}));
+
+        } elsif (exists ($qc_labels->{$hashID}{'CommentType'})) {
+
+            &DTIvisu::getCommentTypeID($qc_labels->{$hashID}{'CommentType'}, $hashID, $dbh);
+            exit unless (exists ($qc_labels->{$hashID}{'CommentTypeID'}));
+
+        } elsif (exists ($qc_labels->{$hashID}{'ParameterType'})) {
+
+            &DTIvisu::getParameterTypeID($qc_labels->{$hashID}{'ParameterType'}, $hashID, $dbh);
+            exit unless (exists ($qc_labels->{$hashID}{'ParameterTypeID'}));
+
+        }
+
+    }
+
+    return (\%$qc_labels);
+}
+
+
+=pod
+=cut
+sub getPredefinedCommentID {
+    my ($predefinedComment, $hashID, $dbh) = @_;
+
+    my $query = <<END_QUERY;
+        SELECT
+            PredefinedCommentID
+        FROM
+            feedback_mri_predefined_comments
+        WHERE 
+            Comment=?
+END_QUERY
+
+    my $sth = $dbh->prepare($query);
+    $sth->execute($predefinedComment);
+
+    if ($sth->rows > 0) {
+        my $row     = $sth->fetchrow_hashref();
+        $qc_labels->{$hashID}->{'PredefinedCommentID'} = $row->{'PredefinedCommentID'};
+    }
+}
+
+
+
+=pod
+=cut
+sub getCommentTypeID {
+    my ($CommentType, $hashID, $dbh) = @_;
+
+    my $query = <<END_QUERY;
+        SELECT
+            CommentTypeID
+        FROM
+            feedback_mri_comment_types
+        WHERE 
+            CommentName=?
+END_QUERY
+
+    my $sth = $dbh->prepare($query);
+    $sth->execute($CommentType);
+    
+    if ($sth->rows > 0) {
+        my $row     = $sth->fetchrow_hashref();
+        $qc_labels->{$hashID}->{'CommentTypeID'} = $row->{'CommentTypeID'};
+    }
+}
+
+
+=pod
+=cut
+sub getParameterTypeID {
+    my ($ParameterType, $hashID, $dbh) = @_;
+
+    my $query = <<END_QUERY;
+        SELECT
+            ParameterTypeID
+        FROM
+            parameter_type
+        WHERE 
+            Name=?
+END_QUERY
+
+    my $sth = $dbh->prepare($query);
+    $sth->execute($ParameterType);
+
+    if ($sth->rows > 0) {
+        my $row     = $sth->fetchrow_hashref();
+        $qc_labels->{$hashID}->{'ParameterTypeID'} = $row->{'ParameterTypeID'};
+    }
+}
+
+=pod
+=cut
+sub readQCnotes {
     my ($qcnotes) = @_;
 
-    my @qc_labels = ["FileType",
-                     "Color_FA",
-                     "Red",      
-                     "Green",
-                     "Blue",      
-                     "Entropy_rating",      
-                     "Motion",         
-                     "Motion_Slice_Wise",   
-                     "Motion_Gradient_Wise",
-                     "Motion_comment",      
-                     "Intensity", 
-                     "Checkerboard", 
-                     "Horizontal_striping", 
-                     "Diagonal_striping", 
-                     "High_intensity_in_acquisition_direction",
-                     "Signal_loss",         
-                     "Intensity_comment",
-                     "Too_few_remaining_gradients",   
-                     "No_b0_left",    
-                     "No_gradient_info",
-                     "Incorrect_diffusion_directions",    
-                     "Duplicate_series",  
-                     "Coverage_comment",  
-                     "large_AP_wrap",
-                     "medium_AP_wrap",
-                     "small_AP_wrapi", 
-                     "tight_LR_brain",    
-                     "base_cerebellum_cut",   
-                     "top_brain_cut", 
-                     "QC_status", 
-                     "Caveat"];
-    
-    # Read qc-notes file into an array @fileTypes with one line per file type
+    # Read qc-notes file into an array @filesQC with one line per file type
     open my $file, '<', $qcnotes or die $!;
-    my @fileTypes = <$file>;
+    my @filesQC = <$file>;
     close $file;
 
+    my (@noRegQCarr, @FinalnoRegQCarr);
+    foreach my $line (@filesQC) {
+        $line =~ s/\r|\n//g;
+        next if ($line eq '');
+        my @tmp_arr = split(',',$line);
+        if ($tmp_arr[0] eq "FinalnoRegQCedDTI") {
+            @FinalnoRegQCarr = @tmp_arr;
+        } elsif ($tmp_arr[0] eq "noRegQCedDTI") {
+            @noRegQCarr      = @tmp_arr;
+        }
+    }
 
+    return (\@noRegQCarr, \@FinalnoRegQCarr);
+}
+
+
+
+sub updateLabelsHash {
+    my ($valueArr) = @_;
+
+    my $qc_info_hash = $qc_labels;
+    my $valArrSize   = @$valueArr;
+    
+    # checks if array size and hash size are identical
+    return undef unless ($valArrSize == (scalar keys %$qc_info_hash));
+        
+    foreach my $arrID (0 .. ($valArrSize - 1)) {
+        $qc_info_hash->{$arrID}->{'Value'} = @$valueArr[$arrID];
+    }
+    
+    return ($qc_info_hash);
 }
