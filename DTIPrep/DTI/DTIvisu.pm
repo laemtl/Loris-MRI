@@ -26,6 +26,7 @@ use Date::Parse;
 use MNI::Startup        qw(nocputimes);
 use MNI::Spawn;
 use MNI::FileUtilities  qw(check_output_dirs);
+use Clone 'clone';
 
 @ISA        = qw(Exporter);
 
@@ -129,7 +130,7 @@ sub createFeedbackRefs {
     my ($qc_info_noRegQChash)      = &DTIvisu::updateLabelsHash($noRegQCarr);
     my ($qc_info_FinalnoRegQChash) = &DTIvisu::updateLabelsHash($FinalnoRegQCarr);
 
-    return ($qc_info_noRegQChash && $qc_info_FinalnoRegQChash);
+    return ($qc_info_noRegQChash, $qc_info_FinalnoRegQChash);
 }
 
 
@@ -203,7 +204,8 @@ sub getPredefinedCommentID {
 
     my $query = <<END_QUERY;
         SELECT
-            PredefinedCommentID
+            PredefinedCommentID,
+            CommentTypeID
         FROM
             feedback_mri_predefined_comments
         WHERE 
@@ -216,6 +218,7 @@ END_QUERY
     if ($sth->rows > 0) {
         my $row     = $sth->fetchrow_hashref();
         $qc_labels->{$hashID}->{'PredefinedCommentID'} = $row->{'PredefinedCommentID'};
+        $qc_labels->{$hashID}->{'CommentTypeID'} = $row->{'CommentTypeID'};
     }
 }
 
@@ -298,7 +301,7 @@ sub readQCnotes {
 sub updateLabelsHash {
     my ($valueArr) = @_;
 
-    my $qc_info_hash = $qc_labels;
+    my $qc_info_hash = clone($qc_labels);
     my $valArrSize   = @$valueArr;
     
     # checks if array size and hash size are identical
@@ -309,4 +312,284 @@ sub updateLabelsHash {
     }
     
     return ($qc_info_hash);
+}
+
+
+
+=pod
+sub getParameterTypeID {
+    my ($name, $dbh) = @_;
+
+    my $query = <<END_QUERY
+        SELECT 
+            ParameterTypeID
+        FROM 
+            parameter_type
+        WHERE
+            Name=?
+END_QUERY
+    my $sth = $dbh->prepare($query);
+    $sth->execute($name);
+
+    my $typeID;
+    if ($sth->rows > 0) {
+        my $row = $sth->fetchrow_hashref();
+        $typeID = $row->{'ParameterTypeID'};
+    }
+
+    return $typeID;
+}
+=cut
+
+
+sub insertParameterType {
+    my ($fileID, $typeID, $value, $dbh) = @_;
+
+    my $query  = <<END_QUERY;
+        SELECT  COUNT(*)
+        FROM    parameter_file
+        WHERE   FileID=? AND ParameterTypeID=?
+END_QUERY
+
+    my $insert = <<END_INSERT;
+        INSERT INTO   parameter_file 
+                      (FileID, ParameterTypeID, Value)
+        VALUES        (?, ?, ?);
+END_INSERT
+
+    my $update = <<END_UPDATE;
+        UPDATE  parameter_file
+        SET     Value=?
+        WHERE   FileID=? AND ParameterTypeID=?
+END_UPDATE
+
+    my $sthqu = $dbh->prepare($query);
+    $sthqu->execute($fileID, $typeID) or die "Couldn't execute statement: " . $sthqu->errstr;
+
+    my $sth;
+    if ($sthqu->rows >  0) {
+        $sth = $dbh->prepare($update);
+        $sth->execute($value, $fileID, $typeID);
+    } elsif ($sthqu->rows == 0) {
+        $sth = $dbh->prepare($insert);
+        $sth->execute($fileID, $typeID, $value);
+    } else {
+        return undef;
+    }
+    
+    $sth_qu->execute($fileID, $typeID);
+    return undef unless ($sth_qu->rows >  0);
+    return 1;
+}
+
+=pod
+sub getPredefinedCommentID {
+    my ($name, $dbh) = @_;
+
+    my $query = <<END_QUERY
+        SELECT 
+            PredefinedCommentID,
+            CommentTypeID
+        FROM 
+            feedback_mri_predefined_comments
+        WHERE
+            Comment=?
+END_QUERY
+    my $sth = $dbh->prepare($query);
+    $sth->execute($name);
+
+    my $predefID;
+    if ($sth->rows > 0) {
+        my $row = $sth->fetchrow_hashref();
+        $predefID = $row->{'PredefinedCommentID'};
+        $comTypeID= $row->{'CommentTypeID'};
+    }
+
+    return ($predefID, $comTypeID);
+}
+=cut
+
+
+sub insertPredefinedComment {
+    my ($fileID, $predefID, $comTypeID, $predefValue, $dbh) = @_;
+
+    my $query  = <<END_QUERY;
+        SELECT  COUNT(*)
+        FROM    feedback_mri_comments
+        WHERE   FileID=? AND PredefinedCommentID=? AND CommentTypeID=?
+END_QUERY
+
+    my $insert = <<END_INSERT;
+        INSERT INTO   feedback_mri_comments 
+                      (FileID, PredefinedCommentID, CommentTypeID)
+        VALUES        (?, ?, ?);
+END_INSERT
+
+    my $delete = <<END_UPDATE;
+        DELETE FROM feedback_mri_comments  
+        WHERE   FileID=? AND PredefinedCommentID=? AND CommentTypeID=?
+END_UPDATE
+
+    my $sth_qu = $dbh->prepare($query);
+    $sth_qu->execute($fileID, $predefID, $comTypeID) or die "Couldn't execute statement: " . $sth_qu->errstr;
+
+    my $sth;
+    if (($sth_qu->rows > 0)  && ($predefValue == "Yes") 
+        || ($sth_qu->rows == 0) && ($predefValue == "No")) {
+        return 1; # do nothing, comment up to date
+    } elsif (($sth_qu->rows > 0) && ($predefValue == "No")) {
+        $sth = $dbh->prepare($delete);
+        $sth->execute($fileID, $predefID, $comTypeID) or die "Couldn't execute statement: " . $sth->errstr;
+    } elsif (($sth_qu->rows == 0) && ($predefValue == "Yes")) {
+        $sth = $dbh->prepare($insert);
+        $sth->execute($fileID, $predefID, $comTypeID) or die "Couldn't execute statement: " . $sth->errstr;
+    } else {
+        return undef;
+    }
+
+    return 1;
+}
+
+
+=pod
+sub getCommentTypeID {
+    my ($name, $dbh) = @_;
+
+    my $query = <<END_QUERY
+        SELECT 
+            CommentTypeID
+        FROM 
+            feedback_mri_comment_types
+        WHERE
+            CommentName=?
+END_QUERY
+    my $sth = $dbh->prepare($query);
+    $sth->execute($name);
+
+    my $commentID;
+    if ($sth->rows > 0) {
+        my $row = $sth->fetchrow_hashref();
+        $commentID= $row->{'CommentTypeID'};
+    }
+
+    return ($commentID);
+}
+=cut
+
+
+sub insertCommentType {
+    my ($fileID, $commentID, $value, $dbh) = @_;
+
+        my $query  = <<END_QUERY;
+        SELECT  Comment
+        FROM    feedback_mri_comments
+        WHERE   FileID=? AND CommentTypeID=? AND Comment is not null
+END_QUERY
+
+    my $insert = <<END_INSERT;
+        INSERT INTO   feedback_mri_comments 
+                      (FileID, CommentTypeID, Comment)
+        VALUES        (?, ?, ?);
+END_INSERT
+
+    my $delete = <<END_DELETE;
+        DELETE FROM feedback_mri_comments  
+        WHERE   FileID=? AND CommentTypeID=?
+END_DELETE
+
+    my $update = <<END_UPDATE;
+        UPDATE  feedback_mri_comments
+        SET     Comment=?
+        WHERE   FileID=? AND CommentTypeID=? 
+END_UPDATE
+
+    my $sth_qu = $dbh->prepare($query);
+    $sth_qu->execute($fileID, $commentID) or die "Couldn't execute statement: " . $sth_qu->errstr;
+
+    # If no comment in DB but in $value, insert it
+    my $sth;
+    if (($sth_qu->rows == 0) && (($value ne "Null") || ($value ne ""))) {
+        $sth = $dbh->prepare($insert);
+        $sth->execute($fileID, $commentID, $comment) or die "Couldn't execute statement: " . $sth->errstr; 
+    } elsif (($sth_qu->rows == 0) && (($value eq "Null") || ($value eq ""))) {
+        return 1;
+    } elsif (($sth_qu->rows >  0) && (($value ne "Null") || ($value ne""))) {
+        my $row = $sth->fetchrow_hashref();
+        $comment= $row->{'Comment'};
+        unless ($comment eq $value) {
+            $sth = $dbh->prepare($update);
+            $sth->execute($comment, $fileID, $commentID) or die "Couldn't execute statement: " . $sth->errstr;
+        }
+    } elsif (($sth_qu->rows >  0) && (($value eq "Null") || ($value eq ""))) {
+        $sth = $dbh->prepare($delete);
+        $sth->execute($fileID, $commentID) or die "Couldn't execute statement: " . $sth->errstr;
+    } else {
+        return undef;
+    }
+
+    return 1;
+}
+
+
+
+sub insertQCStatus {
+    my ($fileID, $qcstatus, $dbh) = @_;
+
+    my $query  = <<END_QUERY;
+        SELECT  QCStatus
+        FROM    files_qcstatus
+        WHERE   FileID=?
+END_QUERY
+
+    my $insert = <<END_INSERT; 
+        INSERT INTO  files_qcstatus
+                     (FileID, QCStatus)
+        VALUES       (?, ?)
+END_INSERT
+
+    my $update = <<END_UPDATE;
+        UPDATE   files_qcstatus
+        SET      QCStatus=?
+        WHERE    FileID=?
+END_UPDATE
+
+    my $sth_qu = $dbh->prepare($query);
+    $sth_qu->execute($fileID, $qcstatus) or die "Couldn't execute statement: " . $sth_qu->errstr;
+
+    my $sth;
+    if ($sth_qu->rows >  0) {
+        $sth = $dbh->prepare($update);
+        $sth->execute($qcstatus, $fileID) or die "Couldn't execute statement: " . $sth->errstr;
+    } elsif ($sth_qu->rows == 0) {
+        $sth = $dbh->prepare($insert);
+        $sth->execute($fileID, $qcstatus) or die "Couldn't execute statement: " . $sth->errstr;
+    } else {
+        return undef;
+    }
+
+    $sth_qu->execute($fileID, $qcstatus) or die "Couldn't execute statement: " . $sth->errstr;
+    return undef unless ($sth_qu->rows >  0);
+    return 1;
+}
+
+
+
+sub updateCaveat {
+    my ($fileID, $caveat, $dbh) = @_;
+
+    my $update = <<END_UPDATE;
+        UPDATE   files
+        SET      Caveat=?
+        WHERE    FileID=?
+END_UPDATE
+
+    my $sth    = $dbh->prepare($update);
+    if ($caveat =~ m/TRUE/i) {
+        $sth->execute(1, $fileID) or die "Couldn't execute statement: " . $sth->errstr;
+    } elsif ($caveat =~ m/FALSE/i) {
+        $sth->execute(0, $fileID) or die "Couldn't execute statement: " . $sth->errstr;
+    } else {
+        return undef;
+    }
+    return 1;
 }
