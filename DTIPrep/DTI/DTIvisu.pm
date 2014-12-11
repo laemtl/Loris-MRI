@@ -150,7 +150,7 @@ sub createLabelsHash {
     $qc_labels->{7}{'PredefinedComment'}  = 'slice wise artifact (DWI ONLY)';
     $qc_labels->{8}{'PredefinedComment'}  = 'gradient wise artifact (DWI ONLY)';
     $qc_labels->{9}{'CommentType'}        = 'Movement artifact';
-    $qc_labels->{10}{'ParameterType'}     = 'Intensity_artifact';
+    $qc_labels->{10}{'ParameterType'}     = 'Intensity';
     $qc_labels->{11}{'PredefinedComment'} = 'checkerboard artifact';
     $qc_labels->{12}{'PredefinedComment'} = 'horizontal intensity striping (Venetian blind effect, DWI ONLY)';
     $qc_labels->{13}{'PredefinedComment'} = 'diagonal striping (NRRD artifact, DWI ONLY)';
@@ -316,34 +316,10 @@ sub updateLabelsHash {
 
 
 
-=pod
-sub getParameterTypeID {
-    my ($name, $dbh) = @_;
-
-    my $query = <<END_QUERY
-        SELECT 
-            ParameterTypeID
-        FROM 
-            parameter_type
-        WHERE
-            Name=?
-END_QUERY
-    my $sth = $dbh->prepare($query);
-    $sth->execute($name);
-
-    my $typeID;
-    if ($sth->rows > 0) {
-        my $row = $sth->fetchrow_hashref();
-        $typeID = $row->{'ParameterTypeID'};
-    }
-
-    return $typeID;
-}
-=cut
-
 
 sub insertParameterType {
     my ($fileID, $typeID, $value, $dbh) = @_;
+    $value = "Not Available" if ($value eq "Not_available");
 
     my $query  = <<END_QUERY;
         SELECT  COUNT(*)
@@ -385,33 +361,6 @@ END_UPDATE
     return undef unless ($row->{'COUNT(*)'} >  0);
     return 1;
 }
-
-=pod
-sub getPredefinedCommentID {
-    my ($name, $dbh) = @_;
-
-    my $query = <<END_QUERY
-        SELECT 
-            PredefinedCommentID,
-            CommentTypeID
-        FROM 
-            feedback_mri_predefined_comments
-        WHERE
-            Comment=?
-END_QUERY
-    my $sth = $dbh->prepare($query);
-    $sth->execute($name);
-
-    my $predefID;
-    if ($sth->rows > 0) {
-        my $row = $sth->fetchrow_hashref();
-        $predefID = $row->{'PredefinedCommentID'};
-        $comTypeID= $row->{'CommentTypeID'};
-    }
-
-    return ($predefID, $comTypeID);
-}
-=cut
 
 
 sub insertPredefinedComment {
@@ -458,30 +407,6 @@ END_UPDATE
 }
 
 
-=pod
-sub getCommentTypeID {
-    my ($name, $dbh) = @_;
-
-    my $query = <<END_QUERY
-        SELECT 
-            CommentTypeID
-        FROM 
-            feedback_mri_comment_types
-        WHERE
-            CommentName=?
-END_QUERY
-    my $sth = $dbh->prepare($query);
-    $sth->execute($name);
-
-    my $commentID;
-    if ($sth->rows > 0) {
-        my $row = $sth->fetchrow_hashref();
-        $commentID= $row->{'CommentTypeID'};
-    }
-
-    return ($commentID);
-}
-=cut
 
 
 sub insertCommentType {
