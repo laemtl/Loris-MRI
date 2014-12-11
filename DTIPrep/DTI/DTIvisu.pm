@@ -363,14 +363,17 @@ END_INSERT
         WHERE   FileID=? AND ParameterTypeID=?
 END_UPDATE
 
-    my $sthqu = $dbh->prepare($query);
-    $sthqu->execute($fileID, $typeID) or die "Couldn't execute statement: " . $sthqu->errstr;
+    my $sth_qu = $dbh->prepare($query);
+    $sth_qu->execute($fileID, $typeID) or die "Couldn't execute statement: " . $sthqu->errstr;
 
     my $sth;
-    if ($sthqu->rows >  0) {
+    # returns undef unless query returns a count value
+    return undef unless ($sth_qu->rows >  0);
+    my $row  = $sth_qu->fetchrow_hashref();
+    if ($row->{'COUNT(*)'} > 0) {
         $sth = $dbh->prepare($update);
         $sth->execute($value, $fileID, $typeID);
-    } elsif ($sthqu->rows == 0) {
+    } elsif ($row->{'COUNT(*)'} == 0) {
         $sth = $dbh->prepare($insert);
         $sth->execute($fileID, $typeID, $value);
     } else {
@@ -378,7 +381,8 @@ END_UPDATE
     }
     
     $sth_qu->execute($fileID, $typeID);
-    return undef unless ($sth_qu->rows >  0);
+    $row = $sth_qu->fetchrow_hashref();
+    return undef unless ($row->{'COUNT(*)'} >  0);
     return 1;
 }
 
@@ -434,13 +438,16 @@ END_UPDATE
     $sth_qu->execute($fileID, $predefID, $comTypeID) or die "Couldn't execute statement: " . $sth_qu->errstr;
 
     my $sth;
-    if (($sth_qu->rows > 0)  && ($predefValue == "Yes") 
-        || ($sth_qu->rows == 0) && ($predefValue == "No")) {
+    # returns undef unless query returns a count value
+    return undef unless ($sth_qu->rows >  0);
+    my $row  = $sth_qu->fetchrow_hashref();
+    if (($row->{'COUNT(*)'} > 0) && ($predefValue eq "Yes") 
+        || ($row->{'COUNT(*)'} == 0) && ($predefValue eq "No")) {
         return 1; # do nothing, comment up to date
-    } elsif (($sth_qu->rows > 0) && ($predefValue == "No")) {
+    } elsif (($row->{'COUNT(*)'} > 0) && ($predefValue eq "No")) {
         $sth = $dbh->prepare($delete);
         $sth->execute($fileID, $predefID, $comTypeID) or die "Couldn't execute statement: " . $sth->errstr;
-    } elsif (($sth_qu->rows == 0) && ($predefValue == "Yes")) {
+    } elsif (($row->{'COUNT(*)'} == 0) && ($predefValue eq "Yes")) {
         $sth = $dbh->prepare($insert);
         $sth->execute($fileID, $predefID, $comTypeID) or die "Couldn't execute statement: " . $sth->errstr;
     } else {
@@ -508,17 +515,17 @@ END_UPDATE
 
     # If no comment in DB but in $value, insert it
     my $sth;
-    if (($sth_qu->rows == 0) && (($value ne "Null") || ($value ne ""))) {
+    if (($sth_qu->rows == 0) && ($value ne "Null") && ($value ne "")) {
         $sth = $dbh->prepare($insert);
-        $sth->execute($fileID, $commentID, $comment) or die "Couldn't execute statement: " . $sth->errstr; 
+        $sth->execute($fileID, $commentID, $value) or die "Couldn't execute statement: " . $sth->errstr; 
     } elsif (($sth_qu->rows == 0) && (($value eq "Null") || ($value eq ""))) {
         return 1;
-    } elsif (($sth_qu->rows >  0) && (($value ne "Null") || ($value ne""))) {
-        my $row = $sth->fetchrow_hashref();
+    } elsif (($sth_qu->rows >  0) && ($value ne "Null") && ($value ne "")) {
+        my $row = $sth_qu->fetchrow_hashref();
         $comment= $row->{'Comment'};
         unless ($comment eq $value) {
             $sth = $dbh->prepare($update);
-            $sth->execute($comment, $fileID, $commentID) or die "Couldn't execute statement: " . $sth->errstr;
+            $sth->execute($value, $fileID, $commentID) or die "Couldn't execute statement: " . $sth->errstr;
         }
     } elsif (($sth_qu->rows >  0) && (($value eq "Null") || ($value eq ""))) {
         $sth = $dbh->prepare($delete);
@@ -554,7 +561,7 @@ END_INSERT
 END_UPDATE
 
     my $sth_qu = $dbh->prepare($query);
-    $sth_qu->execute($fileID, $qcstatus) or die "Couldn't execute statement: " . $sth_qu->errstr;
+    $sth_qu->execute($fileID) or die "Couldn't execute statement: " . $sth_qu->errstr;
 
     my $sth;
     if ($sth_qu->rows >  0) {
@@ -567,7 +574,7 @@ END_UPDATE
         return undef;
     }
 
-    $sth_qu->execute($fileID, $qcstatus) or die "Couldn't execute statement: " . $sth->errstr;
+    $sth_qu->execute($fileID) or die "Couldn't execute statement: " . $sth->errstr;
     return undef unless ($sth_qu->rows >  0);
     return 1;
 }

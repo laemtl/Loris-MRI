@@ -14,20 +14,80 @@ use DB::DBI;
 use DTI::DTI;
 use DTI::DTIvisu;
 
-my $noRegQCedDTIname = "assembly/108583/NAPEN00/mri/processed/DTIPrepPipeline/PreventAD_108583_NAPEN00_noRegQCedDTI_001.mnc";
-my $registeredFinalnoRegQCedDTI = "assembly/108583/NAPEN00/mri/processed/DTIvisualQC/PreventAD_108583_NAPEN00_FinalnoRegQCedDTI_001.mnc";
-my $qcnotes = "/data/preventAD/data/pipelines/DTIvisualQC_ilana/108583/NAPEN00/mri/processed/DTIPrepPipeline/qc-notes";
+my $profile                     = undef;
+my $noRegQCedDTIname            = undef;
+my $registeredFinalnoRegQCedDTI = undef;
+my $qcnotes                     = undef;
+my @args;
 
-{ package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/prod" }
+# Set the help section
+my  $Usage  =   <<USAGE;
+
+Insert DWI qc feedbacks from qcnotes' file for:
+    - noRegQCedDTI file
+    - FinalnoRegQCedDTI file
+
+Usage: $0 [options]
+
+-help for options
+
+USAGE
+
+# Define the table describing the command-line options
+my  @args_table = (
+    ["-profile",           "string", 1, \$profile,                     "name of the config file in ../dicom-archive/.loris_mri."],
+    ["-noRegQCedDTI",      "string", 1, \$noRegQCedDTIname,            "noRegQCedDTI file"],
+    ["-FinalnoRegQCedDTI", "string", 1, \$registeredFinalnoRegQCedDTI, "FinalnoRegQCedDTI file"],
+    ["-qcnotes",           "string", 1, \$qcnotes,                     "qcnotes file containing QC feedbacks to insert"]
+);
+
+Getopt::Tabular::SetHelp ($Usage, '');
+GetOptions(\@args_table, \@ARGV, \@args) || exit 1;
+
+# input option error checking
+{ package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
+if  ($profile && !defined @Settings::db) {
+    print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri/ \n\n";
+    exit 33;
+}
+if (!$profile) {
+    print "$Usage\n\tERROR: You must specify a profile.\n\n";
+    exit 33;
+}
+unless ($noRegQCedDTIname && $registeredFinalnoRegQCedDTI && $qcnotes){
+    print "$Usage\n\tERROR: You must specify a -noRegQCedDTI, -FinalnoRegQCedDTI and -qcnotes option.\n\n";
+}
+
+# Needed for log file
+my  $data_dir    =  $Settings::data_dir;
+my  $log_dir     =  "$data_dir/logs/DTI_visualQC_register";
+system("mkdir -p -m 755 $log_dir") unless (-e $log_dir);
+my  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime(time);
+my  $date        =  sprintf("%4d-%02d-%02d_%02d:%02d:%02d",$year+1900,$mon+1,$mday,$hour,$min,$sec);
+my  $log         =  "$log_dir/DTI_visualQC_feedback_insertion_$date.log";
+open(LOG,">>$log");
+print LOG "Log file, $date\n\n";
+
+
+# Establish database connection
 my  $dbh    =   &DB::DBI::connect_to_db(@Settings::db);
-my $data_dir=   $Settings::data_dir;
+print LOG "\n==> Successfully connected to database \n";
 
-&insertFeedbacks($noRegQCedDTIname,
-                 $registeredFinalnoRegQCedDTI,
-                 $qcnotes,
-                 $dbh
-                );
+my ($success) = &insertFeedbacks($noRegQCedDTIname,
+                                 $registeredFinalnoRegQCedDTI,
+                                 $qcnotes,
+                                 $dbh
+                                );
 
+my $yeah_mess = "\nAll feedbacks were correctly inserted into DB!!\n";
+my $fail_mess = "\nERROR: some feedbacks could not be inserted. Check log above to see what failed.\n";
+if ($success) {
+    print LOG $yeah_mess;
+} else {
+    print LOG $fail_mess;
+    exit;
+}
+    
 exit 0;
 
 
@@ -58,15 +118,13 @@ sub insertFeedbacks {
 
     # Insert Comments 
     my ($success) = &InsertComments($noRegQCedDTIFileID, $noRegQCRefs, $dbh);
-    my $yeah_mess = "\nAll feedbacks were correctly inserted into DB!!\n";
-    my $fail_mess = "\nERROR: some feedbacks could not be inserted. Check log above to see what failed.\n";
+    my ($success) = &InsertComments($FinalnoRegQCedDTIFileID, $finalNoRegQCRefs, $dbh);
+
     if ($success) {
-        print LOG $yeah_mess;
+        return 1;
     } else {
-        print LOG $fail_mess;
-        exit;
+        return undef;
     }
-    
 }
 
 
@@ -75,7 +133,7 @@ sub InsertComments {
     my ($fileID, $hashRefs, $dbh) = @_;
     
     # Insert Parameter Type Comments (drop downs)
-    my @typeIDs = [1, 5, 6, 10];
+    my @typeIDs = (1, 5, 6, 10);
     foreach my $typeID (@typeIDs) {
 #        my $typeName   = $hashRefs->{$typeID}->{'ParameterType'};
         my $typeValue  = $hashRefs->{$typeID}->{'Value'};
@@ -90,10 +148,10 @@ sub InsertComments {
     }    
 
     # Insert feedback MRI predefined comments (checkboxes)
-    my @predefIDs = [2,   3,  4,  7,  8, 11, 12, 
+    my @predefIDs = (2,   3,  4,  7,  8, 11, 12, 
                      13, 14, 15, 17, 18, 19, 20, 
                      21, 23, 24, 25, 26, 27, 28
-                    ];
+                    );
     foreach my $predefID (@predefIDs) {
 #        my $predefName = $hashRefs->{$predefID}->{'PredefinedComment'};
         my $predefValue= $hashRefs->{$predefID}->{'Value'};
@@ -109,7 +167,7 @@ sub InsertComments {
     }                
 
     # Insert text comments
-    my @textIDs = [9, 16, 22];
+    my @textIDs = (9, 16, 22);
     foreach my $textID (@textIDs) {
 #        my $textName    = $hashRefs->{$textID}->{'CommentType'};
         my $textValue   = $hashRefs->{$textID}->{'Value'};
@@ -167,11 +225,11 @@ sub mapSliceWiseArtifact {
     # if slice wise artifact = none, checkbox = No
     # else checkbox for slice wise artifact = Yes and Movement artifact comments is appended 
     # slight, fair or unacceptable slice wise artifact, depending on its intensity
-    my @other_opt = ['Slight', 'Poor', 'Unacceptable'];
+    my @other_opt = ('Slight', 'Poor', 'Unacceptable');
     if ($feedbackRef->{7}->{'Value'} eq 'None') {
         $feedbackRef->{7}->{'Value'} = 'No';    
     } elsif ($feedbackRef->{7}->{'Value'} ~~ @other_opt) {
-        $feedbackRef->{9}->{'Value'}.= $feedbackRef->{7}->{'Value'} . ' slice wise artifact'; 
+        $feedbackRef->{9}->{'Value'}.= '; ' . $feedbackRef->{7}->{'Value'} . ' slice wise artifact'; 
         $feedbackRef->{9}->{'Value'} =~ s/Null//ig;
         $feedbackRef->{7}->{'Value'} = 'Yes';
     } else {
@@ -183,7 +241,7 @@ sub mapSliceWiseArtifact {
     if ($feedbackRef->{8}->{'Value'} eq 'None') {
         $feedbackRef->{8}->{'Value'} = 'No';
     } elsif ($feedbackRef->{8}->{'Value'} ~~ @other_opt) {
-        $feedbackRef->{9}->{'Value'}.= $feedbackRef->{8}->{'Value'} . ' gradient wise artifact';
+        $feedbackRef->{9}->{'Value'}.= '; ' . $feedbackRef->{8}->{'Value'} . ' gradient wise artifact';
         $feedbackRef->{9}->{'Value'} =~ s/Null//ig;
         $feedbackRef->{8}->{'Value'} = 'Yes';
     } else {
@@ -200,30 +258,30 @@ sub checkFeedbackRef {
 
     # Checks parameter types field options
     # 1. Entropy 
-    my @entropy_opt          = ['Acceptable', 'Suspicious', 'Unacceptable', 'Not_available'];
-    my ($entropy_success)    = &checkComments($feedbackRef, 5, @entropy_opt);
+    my @entropy_opt          = ('Acceptable', 'Suspicious', 'Unacceptable', 'Not_available');
+    my ($entropy_success)    = &checkComments($feedbackRef, 5, \@entropy_opt);
     # 2. Movement within scan 
-    my @mvt_within_opt       = ['None', 'Slight', 'Poor', 'Unacceptable'];
-    my ($mvt_within_success) = &checkComments($feedbackRef, 6, @mvt_within_opt);
+    my @mvt_within_opt       = ('None', 'Slight', 'Poor', 'Unacceptable');
+    my ($mvt_within_success) = &checkComments($feedbackRef, 6, \@mvt_within_opt);
     # 3. Other parameter types fields (aka color_artifact 1 and intensity artifact 10) 
-    my @param_type_opt       = ['Fair', 'Good', 'Poor', 'Unacceptable'];
-    my ($param_type_success) = &checkComments($feedbackRef, 1, @param_type_opt);
+    my @param_type_opt       = ('Fair', 'Good', 'Poor', 'Unacceptable');
+    my ($param_type_success) = &checkComments($feedbackRef, 1, \@param_type_opt);
 
     # Checks predefined comments options
-    my @predefined_opt = ['Yes', 'No'];
+    my @predefined_opt = ('Yes', 'No');
     my $predefined_success;
     foreach my $id (keys $feedbackRef) {
         next unless (exists($feedbackRef->{$id}->{'PredefinedComment'}));
-        ($predefined_success) = &checkComments($feedbackRef, $id, @predefined_opt);
+        ($predefined_success) = &checkComments($feedbackRef, $id, \@predefined_opt);
     }
 
     # Checks QC status
-    my @qcstatus_opt       = ['Pass', 'Fail'];
-    my ($qcstatus_success) = &checkComments($feedbackRef, 29, @qcstatus_opt);
+    my @qcstatus_opt       = ('Pass', 'Fail');
+    my ($qcstatus_success) = &checkComments($feedbackRef, 29, \@qcstatus_opt);
 
     # Checks Caveat
-    my @caveat_opt   = ['True','False'];
-    my ($caveat_opt) = &checkComments($feedbackRef, 30, @caveat_opt);
+    my @caveat_opt   = ('True','False');
+    my ($caveat_opt) = &checkComments($feedbackRef, 30, \@caveat_opt);
 
     return 1 if ($entropy_success    && 
                  $mvt_within_success && 

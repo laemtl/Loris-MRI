@@ -90,8 +90,8 @@ my ($FinalQCedDTI)         = grep { $_ =~ /FinalQCedDTI/}                  @$QCe
 my ($FinalnoRegQCedDTI)    = grep { $_ =~ /FinalnoRegQCedDTI_\d\d\d\.mnc/} @$QCedfiles;
 my ($FinalnoRegQCedDTIrgb) = grep { $_ =~ /-eddy-reg-to-t1_rgb/}           @$QCedfiles;
 # Read content of DTI visual QC directory and extract qc-notes
-my ($qc_notes)  = &DTI::getFilesList($DTIvisu_subdir, 'qc-notes');
-
+my ($qcnotes_list) = &DTI::getFilesList($DTIvisu_subdir, 'qc-notes');
+my $qc_notes       = $$qcnotes_list[0];
 
 unless ($FinalQCedDTI && $FinalnoRegQCedDTI && $FinalnoRegQCedDTIrgb) {
     print LOG "\nERROR:\n\tCould not find all outputs to register in $DTIvisu_subdir.\n";
@@ -129,13 +129,15 @@ unless ($registeredFinalnoRegQCedDTIrgb) {
     #######################
     ####### Step 5: #######  Register qc_notes
     #######################
-if ($registeredFinalnoRegQCedDTI && $noRegQCedDTIname) {
+if ($registeredFinalnoRegQCedDTI && $noRegQCedDTIname && $qc_notes) {
     print LOG "\nInserting feedbacks into the database\n";
-    my ($success) = &insertFeedbacks($noRegQCedDTIname, 
-                                     $registeredFinalnoRegQCedDTI,
-                                     $qcnotes, 
-                                     $dbh
-                                    );
+    my $cmd = "perl Insert_Feedback.pl " 
+       . " -profile "           . $profile     
+       . " -noRegQCedDTI "      . $noRegQCedDTIname
+       . " -FinalnoRegQCedDTI " . $registeredFinalnoRegQCedDTI
+       . " -qcnotes "           .  $qc_notes;
+
+    system($cmd);
 } else {
     print LOG "\nERROR: Feedbacks not inserted into the database\n";
 } 
@@ -337,18 +339,3 @@ sub fetchRegisteredFile {
 
 
 
-
-=pod
-=cut
-sub insertFeedbacks {
-    my ($noRegQCedDTI, $FinalnoRegQCedDTI, $qcnotes, $dbh) = @_;
-
-    # Get FileIDs
-    my ($noRegQCedDTIFileID)      = &DTIvisu::getFileID($noRegQCedDTI,      $dbh);
-    my ($FinalnoRegQCedDTIFileID) = &DTIvisu::getFileID($FinalnoRegQCedDTI, $dbh);
-    print LOG "\nERROR: could not find fileID of $noRegQCedDTIFileID or $FinalnoRegQCedDTIFileID\n" unless ($noRegQCedDTIFileID && $FinalnoRegQCedDTIFileID);
-
-    # Read qc-notes file
-    my ($feedbackRefs) = &DTIvisu::createFeedbackRefs($qcnotes);
-
-}
