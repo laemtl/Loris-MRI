@@ -114,11 +114,13 @@ sub getAnatFile {
     # Fetch files in native directory that matched t1_scan_type
     my $anat_list   = DTI::getFilesList($nativedir, $t1_scan_type);
 
-    # Return undef if no anat found, first anat otherwise
+    # Return undef if no anat found, last anat otherwise
+    @sorted_anat = sort(@$anat_list);
+    $anat_index  = @sorted_anat - 1;
     if (@$anat_list == 0) { 
         return undef; 
     } else { 
-        my $anat    = @$anat_list[0];
+        my $anat    = @sorted_anat[$anat_index];
         return $anat;
     }
 }
