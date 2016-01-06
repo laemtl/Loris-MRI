@@ -32,7 +32,6 @@ $|++;
 my $Usage = "Usage: $0 </PATH/TO/FILE> <outputType> [options]\nSee $0 -help for more info\n";
 
 my $coordinateSpace;
-my $classifyAlgorithm;
 my $outputType;
 #my $fileType = 'mnc';
 my $comment;
@@ -52,7 +51,6 @@ my $subjectIDsref;
 
 # build arguments table for getopt
 &Getopt::Tabular::AddPatternType("coordinateOptions", "^(native|linear|nonlinear)\$", "'native', 'linear', or 'nonlinear'");
-&Getopt::Tabular::AddPatternType("classifyOptions", "^(clean|cocosco|em)\$", "'clean', 'cocosco', or 'em'");
 &Getopt::Tabular::AddPatternType("sourceList", "^[0-9,]+\$", "comma separated file ids, with no whitespace");
 #&Getopt::Tabular::AddPatternType("filetypeOptions", "^(mnc|obj|xfm|xfmmnc|imp|vertstat)\$", "'mnc','obj','xfm','xfmmnc','imp', or 'vertstat'");
 my @arg_table =
@@ -64,8 +62,6 @@ my @arg_table =
       "Acquisition protocol, such as t1w, t2w, pdw..."],
      ["-coordspace", "coordinateOptions", 1, \$coordinateSpace,
       "Coordinate space, either native, linear or nonlinear"],
-     ["-classifyalg", "classifyOptions", 1, \$classifyAlgorithm,
-      "Classification algorithm, either clean, cocosco or em"],
 
      ["-source", "sourceList", 1, \$source_list,
       "The comma separated (no whitespace) list of file IDs from which this new file was generated"],
@@ -88,7 +84,7 @@ my @arg_table =
 
 # input option error checking
 { package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
-if ($profile && !defined @Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri/ \n\n"; exit 33; }
+if ($profile && !@Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri/ \n\n"; exit 33; }
 if(!$profile) { print "$Usage\n\tERROR: You must specify a profile.\n\n";  exit 33;  }
 
 # make sure we have all the arguments we need
@@ -217,9 +213,6 @@ if($coordinateSpace) {
 	$file->setFileData('CoordinateSpace', $coordinateSpace);
 }
 
-if($classifyAlgorithm) {
-	$file->setFileData('ClassifyAlgorithm', $classifyAlgorithm);
-}
 
 $file->setFileData('OutputType', $outputType);
 

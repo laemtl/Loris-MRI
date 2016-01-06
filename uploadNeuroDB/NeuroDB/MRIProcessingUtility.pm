@@ -191,7 +191,7 @@ sub createTarchiveArray {
     my ($tarchive,$globArchiveLocation) = @_;
     my $where = "ArchiveLocation='$tarchive'";
     if ($globArchiveLocation) {
-        $where = "ArchiveLocation LIKE '%/".basename($tarchive)."'";
+        $where = "ArchiveLocation LIKE '%".basename($tarchive)."'";
     }
     my $query = "SELECT PatientName, PatientID, PatientDoB, md5sumArchive,".
                 " DateAcquired, DicomArchiveID, PatientGender,".
@@ -827,9 +827,11 @@ sub moveAndUpdateTarchive {
     ############################################################
     # now update tarchive table to store correct location ######
     ############################################################
+    my $newArchiveLocationField = $newTarchiveLocation;
+    $newArchiveLocationField    =~ s/$Settings::tarchiveLibraryDir\/?//g;
     $query = "UPDATE tarchive ".
              " SET ArchiveLocation=" . 
-              ${$this->{'dbhr'}}->quote($newTarchiveLocation) .
+              ${$this->{'dbhr'}}->quote($newArchiveLocationField) .
              " WHERE DicomArchiveID=". 
              ${$this->{'dbhr'}}->quote(
                 $tarchiveInfo->{'DicomArchiveID'}
@@ -1024,7 +1026,7 @@ sub validateCandidate {
     $sth =  ${$this->{'dbhr'}}->prepare($query);
     $sth->execute($subjectIDsref->{'PSCID'});
     if ($sth->rows == 0) {
-        print LOG  "\n\n => No PSCID";
+        print "\n\n => No PSCID";
         $CandMismatchError= 'PSCID does not exist';
         return $CandMismatchError;
     } 
@@ -1049,11 +1051,11 @@ sub validateCandidate {
     $sth =  ${$this->{'dbhr'}}->prepare($query);
     $sth->execute($subjectIDsref->{'visitLabel'});
     if (($sth->rows == 0) && (!$subjectIDsref->{'createVisitLabel'})) {
-        print LOG  "\n\n => No Visit label";
+        print "\n\n => No Visit label";
         $CandMismatchError= 'Visit label does not exist';
         return $CandMismatchError;
     } elsif (($sth->rows == 0) && ($subjectIDsref->{'createVisitLabel'})) {
-        print LOG  "\n\n => Will create visit label $subjectIDsref->{'visitLabel'}";
+        print "\n\n => Will create visit label $subjectIDsref->{'visitLabel'}";
     } 
 
    return $CandMismatchError;

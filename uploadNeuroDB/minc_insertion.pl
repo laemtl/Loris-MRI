@@ -42,6 +42,7 @@ my $NewScanner  = 1;           # This should be the default unless you are a
 my $xlog        = 0;           # default should be 0
 my $globArchiveLocation = 0;   # whether to use strict ArchiveLocation strings
                                # or to glob them (like '%Loc')
+my $no_nii      = 1;           # skip NIfTI creation by default
 my $template    = "TarLoad-$hour-$min-XXXXXX"; # for tempdir
 my ($tarchive,%tarchiveInfo,$minc);
 
@@ -124,7 +125,7 @@ USAGE
 { package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
 
 
-if ($profile && !defined @Settings::db) { 
+if ($profile && !@Settings::db) { 
     print "\n\tERROR: You don't have a ".
     "configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri/ \n\n";
     exit 2; 
@@ -153,11 +154,14 @@ unless (-e $minc) {
 ########### Create the Specific Log File #######################
 ################################################################
 my $data_dir = $Settings::data_dir;
-my $jiv_dir = $data_dir.'/jiv';
-my $TmpDir = tempdir($template, TMPDIR => 1, CLEANUP => 1 );
+$no_nii      = $Settings::no_nii if defined $Settings::no_nii;
+my $jiv_dir  = $data_dir.'/jiv';
+my $TmpDir   = tempdir($template, TMPDIR => 1, CLEANUP => 1 );
 my @temp     = split(/\//, $TmpDir);
 my $templog  = $temp[$#temp];
 my $LogDir   = "$data_dir/logs"; 
+my $tarchiveLibraryDir = $Settings::tarchiveLibraryDir;
+$tarchiveLibraryDir    =~ s/\/$//g;
 print "log dir is $LogDir \n";
 if (!-d $LogDir) { 
     mkdir($LogDir, 0700); 
@@ -185,11 +189,13 @@ my $utility = NeuroDB::MRIProcessingUtility->new(
 ################################################################
 #################### Check is_valid column #####################
 ################################################################
+my $ArchiveLocation = $tarchive;
+$ArchiveLocation    =~ s/$tarchiveLibraryDir\/?//g;
 my $where = "WHERE t.ArchiveLocation='$tarchive'";
 if ($globArchiveLocation) {
-    $where = "WHERE t.ArchiveLocation LIKE '%/".basename($tarchive)."'";
+    $where = "WHERE t.ArchiveLocation LIKE '%".basename($tarchive)."'";
 }
-my $query = "SELECT m.IsValidated FROM mri_upload m " .
+my $query = "SELECT m.IsTarchiveValidated FROM mri_upload m " .
             "JOIN tarchive t on (t.TarchiveID = m.TarchiveID) $where ";
 print $query . "\n";
 my $is_valid = $dbh->selectrow_array($query);
@@ -208,7 +214,7 @@ if (($is_valid == 0) && ($force==0)) {
 ############## Construct the tarchiveinfo Array ################
 ################################################################
 %tarchiveInfo = $utility->createTarchiveArray(
-                    $tarchive,$globArchiveLocation
+                    $ArchiveLocation, $globArchiveLocation
                 );
 
 ################################################################
@@ -306,7 +312,7 @@ my $unique = $utility->computeMd5Hash($file);
 if (!$unique) { 
     print "--> WARNING: This file has already been uploaded! \n"  if $debug;
     print LOG " --> WARNING: This file has already been uploaded!"; 
-    exit 8; 
+#    exit 8; 
 } 
 
 ################################################################
@@ -368,11 +374,19 @@ print "\nFinished file:  ".$file->getFileDatum('File')." \n" if $debug;
 
 
 ################################################################
-###################### Creating of Jivs ########################
+###################### Creation of Jivs ########################
 ################################################################
 if (!$no_jiv) {
     print "Making JIV\n" if $verbose;
     NeuroDB::MRI::make_jiv(\$file, $data_dir, $jiv_dir);
+}
+
+################################################################
+###################### Creation of NIfTIs ######################
+################################################################
+unless ($no_nii) {
+    print "Creating NIfTI files\n" if $verbose;
+    NeuroDB::MRI::make_nii(\$file, $data_dir);
 }
 
 ################################################################
