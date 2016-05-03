@@ -150,13 +150,13 @@ sub createLabelsHash {
     $qc_labels->{7}{'PredefinedComment'}  = 'slice wise artifact (DWI ONLY)';
     $qc_labels->{8}{'PredefinedComment'}  = 'gradient wise artifact (DWI ONLY)';
     $qc_labels->{9}{'CommentType'}        = 'Movement artifact';
-    $qc_labels->{10}{'ParameterType'}     = 'Intensity';
+    $qc_labels->{10}{'ParameterType'}     = 'Intensity_artifact';
     $qc_labels->{11}{'PredefinedComment'} = 'checkerboard artifact';
     $qc_labels->{12}{'PredefinedComment'} = 'horizontal intensity striping (Venetian blind effect, DWI ONLY)';
     $qc_labels->{13}{'PredefinedComment'} = 'diagonal striping (NRRD artifact, DWI ONLY)';
     $qc_labels->{14}{'PredefinedComment'} = 'high intensity in direction of acquisition';
     $qc_labels->{15}{'PredefinedComment'} = 'signal loss (dark patches)';
-    $qc_labels->{16}{'CommentType'}       = 'Intensity';
+    $qc_labels->{16}{'CommentType'}       = 'Intensity artifact';
     $qc_labels->{17}{'PredefinedComment'} = 'Too few remaining gradients (DWI ONLY)';
     $qc_labels->{18}{'PredefinedComment'} = 'No b0 remaining after DWIPrep (DWI ONLY)';
     $qc_labels->{19}{'PredefinedComment'} = 'No gradient information available from scanner (DWI ONLY)';
@@ -169,7 +169,7 @@ sub createLabelsHash {
     $qc_labels->{26}{'PredefinedComment'} = 'Too tight LR, affecting brain';
     $qc_labels->{27}{'PredefinedComment'} = 'Base of cerebellum cut off';
     $qc_labels->{28}{'PredefinedComment'} = 'Top of brain cut off';
-    $qc_labels->{29}{'Files'}             = 'QC_status';
+    $qc_labels->{29}{'Files'}             = 'QCStatus';
     $qc_labels->{30}{'Files'}             = 'Caveat';
 
     foreach my $hashID (keys %$qc_labels) {
