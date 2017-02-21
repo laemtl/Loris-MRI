@@ -312,7 +312,7 @@ my $unique = $utility->computeMd5Hash($file);
 if (!$unique) { 
     print "--> WARNING: This file has already been uploaded! \n"  if $debug;
     print LOG " --> WARNING: This file has already been uploaded!"; 
-#    exit 8; 
+    exit 8; 
 } 
 
 ################################################################

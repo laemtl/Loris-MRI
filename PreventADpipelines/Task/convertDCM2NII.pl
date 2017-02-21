@@ -77,7 +77,7 @@ foreach my $tarchive (@tars) {
     }
 
     # Step 5: keep only Encoding, Retrieval, oriented MPRAGE and fieldmap images.
-    my @remove_list = glob "$visit_out_dir/AAHScout* $visit_out_dir/AXIAL* $visit_out_dir/co* $visit_out_dir/MPRAGE* $visit_out_dir/RSN* $visit_out_dir/*pCASL* $visit_out_dir/T2SAG* $visit_out_dir/*TI900*";
+    my @remove_list = glob "$visit_out_dir/AAHScout* $visit_out_dir/AXIAL* $visit_out_dir/co* $visit_out_dir/MPRAGE* $visit_out_dir/RSN* $visit_out_dir/*pCASL* $visit_out_dir/T2SAG* $visit_out_dir/*TI900* $visit_out_dir/DTI64* $visit_out_dir/grecfmm12echoes $visit_out_dir/*mp2ragewip $visit_out_dir/*FLAIR* $visit_out_dir/*T2wspaces*";
     remove_tree(@remove_list, {result => \my $res_list});
     if (@$res_list == 0){
         print   LOG "\t==> No files were deleted.\n";
@@ -93,7 +93,7 @@ foreach my $tarchive (@tars) {
 
 sub getSiteSubjectVisitIDs {
     my ($dcm_dir)   = @_;
-    if ($dcm_dir =~ m/[A-Za-z0-9]+_([0-9]+)_([N,P][A,R][P,E][B,F][L,U][0-9][0-9])/i) {
+    if ($dcm_dir =~ m/[A-Za-z0-9]+_([0-9]+)_([N,P,Y][A,R,N][P,E,G][B,F,V][L,U,I][0-9][0-9])/i) {
         my $site    = "PreventAD";          # only one site so far, will be changed when several sites
         my $candID  = $1;
         my $visit   = $2;
