@@ -132,8 +132,8 @@ sub insertFeedbacks {
 sub InsertComments {
     my ($fileID, $hashRefs, $dbh) = @_;
     
-    # Insert Parameter Type Comments (drop downs)
-    my @typeIDs = (1, 5, 6, 10);
+    # Insert Feedback MRI Comments (drop downs)
+    my @typeIDs = (5, 6, 10);
     foreach my $typeID (@typeIDs) {
 #        my $typeName   = $hashRefs->{$typeID}->{'ParameterType'};
         my $typeValue  = $hashRefs->{$typeID}->{'Value'};
@@ -181,10 +181,11 @@ sub InsertComments {
         }
     }
 
-    # Insert QC status
+    # Insert QC and Selected status
+    my $selected    = $hashRefs->{1}->{'Value'};
     my $qcstatus    = $hashRefs->{29}->{'Value'};
-    my ($qcsuccess) = &DTIvisu::insertQCStatus($fileID, $qcstatus, $dbh);
-    my $qcmessage   = "\nERROR: could not insert FileID $fileID, QCstatus $qcstatus into files_qc_status\n";
+    my ($qcsuccess) = &DTIvisu::insertQCStatus($fileID, $qcstatus, $selected, $dbh);
+    my $qcmessage   = "\nERROR: could not insert FileID $fileID, QCstatus $qcstatus, Selected $selected into files_qc_status\n";
     unless ($qcsuccess) {
         print LOG $qcmessage;
         exit;

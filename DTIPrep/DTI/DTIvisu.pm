@@ -465,7 +465,7 @@ END_UPDATE
 
 
 sub insertQCStatus {
-    my ($fileID, $qcstatus, $dbh) = @_;
+    my ($fileID, $qcstatus, $selected, $dbh) = @_;
 
     my $query  = <<END_QUERY;
         SELECT  QCStatus
@@ -475,13 +475,13 @@ END_QUERY
 
     my $insert = <<END_INSERT; 
         INSERT INTO  files_qcstatus
-                     (FileID, QCStatus)
-        VALUES       (?, ?)
+                     (FileID, QCStatus, Selected)
+        VALUES       (?, ?, ?)
 END_INSERT
 
     my $update = <<END_UPDATE;
         UPDATE   files_qcstatus
-        SET      QCStatus=?
+        SET      QCStatus=?, Selected=?
         WHERE    FileID=?
 END_UPDATE
 
@@ -491,10 +491,10 @@ END_UPDATE
     my $sth;
     if ($sth_qu->rows >  0) {
         $sth = $dbh->prepare($update);
-        $sth->execute($qcstatus, $fileID) or die "Couldn't execute statement: " . $sth->errstr;
+        $sth->execute($qcstatus, $selected, $fileID) or die "Couldn't execute statement: " . $sth->errstr;
     } elsif ($sth_qu->rows == 0) {
         $sth = $dbh->prepare($insert);
-        $sth->execute($fileID, $qcstatus) or die "Couldn't execute statement: " . $sth->errstr;
+        $sth->execute($fileID, $qcstatus, $selected) or die "Couldn't execute statement: " . $sth->errstr;
     } else {
         return undef;
     }
