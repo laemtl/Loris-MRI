@@ -46,7 +46,7 @@ GetOptions(\@args_table, \@ARGV, \@args) || exit 1;
 
 # input option error checking
 { package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
-if  ($profile && !defined @Settings::db) {
+if  ($profile && !@Settings::db) {
     print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri/ \n\n";
     exit 33;
 }
@@ -116,9 +116,12 @@ sub insertFeedbacks {
     &CheckFeedbackRefOptions($noRegQCRefs);
     &CheckFeedbackRefOptions($finalNoRegQCRefs);
 
-    # Insert Comments 
-    my ($success) = &InsertComments($noRegQCedDTIFileID, $noRegQCRefs, $dbh);
-    my ($success) = &InsertComments($FinalnoRegQCedDTIFileID, $finalNoRegQCRefs, $dbh);
+    # Insert Comments for noRegQCedDTIFileID or return undef
+    my ($success) = &InsertComments($noRegQCedDTIFileID, "noRegQCedDTI", $noRegQCRefs, $dbh);
+	return undef unless ($success);
+
+	# Insert Comments for FinalnoRegQCedDTIFileID
+    ($success) = &InsertComments($FinalnoRegQCedDTIFileID, "FinalnoRegQCedDTI", $finalNoRegQCRefs, $dbh);
 
     if ($success) {
         return 1;
@@ -130,10 +133,10 @@ sub insertFeedbacks {
 
 
 sub InsertComments {
-    my ($fileID, $hashRefs, $dbh) = @_;
+    my ($fileID, $selected, $hashRefs, $dbh) = @_;
     
     # Insert Feedback MRI Comments (drop downs)
-    my @typeIDs = (5, 6, 10);
+    my @typeIDs = (1, 5, 6, 10);
     foreach my $typeID (@typeIDs) {
 #        my $typeName   = $hashRefs->{$typeID}->{'ParameterType'};
         my $typeValue  = $hashRefs->{$typeID}->{'Value'};
@@ -182,8 +185,8 @@ sub InsertComments {
     }
 
     # Insert QC and Selected status
-    my $selected    = $hashRefs->{1}->{'Value'};
     my $qcstatus    = $hashRefs->{29}->{'Value'};
+    $selected = "" if $qcstatus eq "Fail"; # don't populate the selected if failed QC
     my ($qcsuccess) = &DTIvisu::insertQCStatus($fileID, $qcstatus, $selected, $dbh);
     my $qcmessage   = "\nERROR: could not insert FileID $fileID, QCstatus $qcstatus, Selected $selected into files_qc_status\n";
     unless ($qcsuccess) {
