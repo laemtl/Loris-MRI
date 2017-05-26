@@ -15,6 +15,7 @@ my $date        = sprintf("%4d-%02d-%02d %02d:%02d:%02d",$year+1900,$mon+1,$mday
 my $profile     = undef;
 my $pattern     = undef;
 my $tarchive    = undef;
+my $outputdir   = undef;
 
 
 my @opt_table = (
@@ -24,6 +25,7 @@ my @opt_table = (
                  ["Advanced options","section"],
                  ["-pattern"    ,"string", 1, \$pattern, "Pattern to use to grep DICOM files (typically, the series description)."],
                  ["-tarchive"   ,"string", 1, \$tarchive,"Tarchive file to parse."],
+                 ["-outputdir"  ,"string", 1, \$outputdir, "Where the grepped DICOM should be stored."]
                 );
 
 my $Help = <<HELP;
@@ -77,7 +79,7 @@ if (!$grepped_dir) {
     print LOG "\nERROR: could not find any DICOM containing $pattern in $study_dir.\n";
     exit;
 } 
-my $moved_tar   = tar_and_move_dicom($study_dir, $grepped_dir, $TmpDir, $data_dir);
+my $moved_tar   = tar_and_move_dicom($study_dir, $grepped_dir, $TmpDir, $outputdir);
 if ($moved_tar == 1) {
     print LOG "\nERROR: could not determine pscid, dccid, visit label and date of the study $study_dir\n";
 } elsif ($moved_tar == 2) {
@@ -137,7 +139,7 @@ sub grep_dicom {
 
 
 sub tar_and_move_dicom { 
-    my ($study_dir, $grepped_dir, $TmpDir, $data_dir) = @_;
+    my ($study_dir, $grepped_dir, $TmpDir, $outputdir) = @_;
 
     my $study_name  = basename($study_dir);
     my ($pscid, $dccid, $visit_label, $date);
@@ -150,7 +152,7 @@ sub tar_and_move_dicom {
         return 1;
     }
 
-    my $new_dir     = $data_dir . "/pipelines/ASL/raw_dicom/" .
+    my $new_dir     = $outputdir . "/" .
                       $dccid    . "/" .
                       $visit_label;
     make_path($new_dir, {mode => 0750}) unless (-e $new_dir);
