@@ -42,7 +42,7 @@ USAGE
 
 # input option error checking
 { package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
-if ($profile && !defined @Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri \n\n"; exit 33; }
+if ($profile && !@Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri \n\n"; exit 33; }
 if(!$tarchive || !$pattern || !$profile) { print $Help; print "$Usage\n\tERROR: You must specify a valid tarchive, a pattern to grep for in the DICOMs and an existing profile.\n\n";  exit 33;  }
 
 # These settings are in a config file (profile)
