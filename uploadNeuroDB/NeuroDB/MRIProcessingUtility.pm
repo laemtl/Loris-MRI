@@ -3,12 +3,20 @@ use English;
 use Carp;
 use strict;
 use warnings;
+no warnings 'once';
 use Data::Dumper;
 use File::Basename;
 use NeuroDB::File;
 use NeuroDB::MRI;
 use NeuroDB::DBI;
+use NeuroDB::Notify;
 use Path::Class;
+
+## Define Constants ##
+my $notify_detailed   = 'Y'; # notification_spool message flag for messages to be displayed 
+                             # with DETAILED OPTION in the front-end/imaging_uploader 
+my $notify_notsummary = 'N'; # notification_spool message flag for messages to be displayed 
+                             # with SUMMARY Option in the front-end/imaging_uploader 
 
 ################################################################
 #####################Constructor ###############################
@@ -22,24 +30,27 @@ sub new {
        );
     }
     my $self = {};
-    ############################################################
-    #### Create the log file ###################################
-    ############################################################
-    my $LogDir  = dirname($logfile);
-    my $file_name = basename($logfile);
-    my $dir = dir($LogDir); 
-    my $file = $dir->file($file_name);
-    my $LOG = $file->openw();
-    $LOG->autoflush(1);
 
     ############################################################
     ############### Create a settings package ##################
     ############################################################
     my $profile = "prod";
-    {  
-     package Settings; 
+    {
+     package Settings;
      do "$ENV{LORIS_CONFIG}/.loris_mri/$profile";
     }
+
+    ############################################################
+    #### Create the log file and a Notify Object################
+    ############################################################
+    my $LogDir  = dirname($logfile);
+    my $file_name = basename($logfile);
+    my $dir = dir($LogDir);
+    my $file = $dir->file($file_name);
+    my $LOG = $file->openw();
+    my $Notify = NeuroDB::Notify->new( $dbhr );
+    $LOG->autoflush(1);
+    $self->{'Notify'} = $Notify;
     $self->{'LOG'} = $LOG;
     $self->{'verbose'} = $verbose;
     $self->{'LogDir'} = $LogDir;
@@ -51,16 +62,14 @@ sub new {
 }
 
 ################################################################
-## writeErrorLog ###############################################
+## writeErrorLog and update Notification Table##################
 ## this is a useful function that will close the log and write #
 ## error messages in case of abnormal program termination ######
 ################################################################
 sub writeErrorLog {
     my $this = shift;
     my ($message, $failStatus,$LogDir) = @_;
-    if ($this->{debug}) {
-        print $message;
-    }
+    print $message;
     $this->{LOG}->print($message);
     $this->{LOG}->print(
         "program exit status: $failStatus"
@@ -68,7 +77,7 @@ sub writeErrorLog {
     `cat $this->{logfile}  >> $this->{LogDir}/error.log`;
     close $this->{LOG};
     `rm -f $this->{logfile} `;
-}       
+}
 
 
 #################################################################    
@@ -81,8 +90,8 @@ sub lookupNextVisitLabel {
     my ($CandID, $dbhr) = @_;
     my $visitLabel = 1;
     my $query = "SELECT Visit_label FROM session".
-                " WHERE CandID=$CandID".
-                " ORDER BY ID DESC LIMIT 1"; 
+                " WHERE CandID=$CandID AND Active='Y'".
+                " ORDER BY ID DESC LIMIT 1";
     if ($this->{debug}) {
         print $query . "\n";
     }
@@ -94,35 +103,90 @@ sub lookupNextVisitLabel {
     }
     return $visitLabel;
 }
-                 
+
+################################################################
+########### getFileNamesfromSeriesUID  #########################
+################################################################
+sub getFileNamesfromSeriesUID {
+
+    # longest common prefix
+    sub LCP {
+      return '' unless @_;
+      my $prefix = shift;
+      for (@_) {
+          chop $prefix while (! /^\Q$prefix\E/);
+          }
+      return $prefix;
+    }
+
+    my $dbh = &NeuroDB::DBI::connect_to_db(@Settings::db);
+    my ($seriesuid, @alltarfiles) = @_;
+    my @filearray;
+    my $tarstring = ' --wildcards ';
+    my $query = "select tf.FileName from tarchive_files as tf".
+        " where tf.TarchiveID = (select distinct ts.tarchiveID   from tarchive_series as ts where ts.SeriesUID=?)".
+        " and tf.SeriesNumber = (select distinct ts.SeriesNumber from tarchive_series as ts where ts.SeriesUID=?)".
+        " order by tf.FileNumber";
+    my $sth = $dbh->prepare($query);
+    $sth->execute($seriesuid, $seriesuid);
+    while (my $tf = $sth->fetchrow_hashref()) {
+        push @filearray, $tf->{'FileName'};
+        $tarstring .= "'*" . $tf->{'FileName'} . "' ";
+    }
+
+    my $lcp = LCP(@alltarfiles);
+    $tarstring =~ s/$lcp//g;
+
+    return $tarstring;
+}
+
 ################################################################
 ##################### extract_tarchive #########################
 ################################################################
 =pod
-Most important function now. Gets the tarchive and 
+Most important function now. Gets the tarchive and
 extracts it so data can actually be uploaded
 =cut
 sub extract_tarchive {
     my $this = shift;
-    my ($tarchive) = @_;
-    print "Extracting tarchive $tarchive in $this->{TmpDir} \n" 
-    if $this->{verbose};
+    my ($tarchive, $tarchive_srcloc, $seriesuid) = @_;
+    my $upload_id = undef;
+    my $message = '';
+    my $tarnames = '';
+    # get the upload_id from the tarchive source location
+    # to pass to the notification_spool
+    $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    $message = "\nExtracting tarchive $tarchive in $this->{TmpDir} \n";
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     my $cmd = "cd $this->{TmpDir} ; tar -xf $tarchive";
-    print $cmd . "\n" if $this->{verbose}; 
+    $message = "\n" . $cmd . "\n";
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     `$cmd`;
     opendir TMPDIR, $this->{TmpDir};
-    my @tars = grep { /\.tar\.gz$/ && -f "$this->{TmpDir}/$_" } 
+    my @tars = grep { /\.tar\.gz$/ && -f "$this->{TmpDir}/$_" }
         readdir(TMPDIR);
     closedir TMPDIR;
+
     if (scalar(@tars) != 1) {
-        print "Error: Could not find inner tar in $tarchive!\n";
+        my $message = "Error: Could not find inner tar in $tarchive!\n";
+        print $message;
         print @tars . "\n";
+        $this->spool($message, 'Y', $upload_id, $notify_notsummary);
         exit 1 ;
     }
+
     my $dcmtar = $tars[0];
     my $dcmdir = $dcmtar;
     $dcmdir =~ s/\.tar\.gz$//;
-    `cd $this->{TmpDir} ; tar -xzf $dcmtar`;
+
+    if (defined($seriesuid)) {
+        print "seriesuid: $seriesuid\n" if $this->{verbose};
+        my @alltarfiles = `cd $this->{TmpDir} ; tar -tzf $dcmtar`;
+        $tarnames = getFileNamesfromSeriesUID($seriesuid, @alltarfiles);
+        print "tarnames: $tarnames\n" if $this->{verbose};
+    }
+
+    `cd $this->{TmpDir} ; tar -xzf $dcmtar $tarnames`;
     return $dcmdir;
 }
 
@@ -130,19 +194,23 @@ sub extract_tarchive {
 ################################################################
 ############ sub extractAndParseTarchive #######################
 ################################################################
-
 sub extractAndParseTarchive {
-    
+
     my $this = shift;
-    my ($tarchive) = @_;
-    my $study_dir = $this->{TmpDir}  . "/" .  
-        $this->extract_tarchive($tarchive);
+    my ($tarchive, $tarchive_srcloc, $seriesuid) = @_;
+    # get the upload_id from the tarchive_srcloc to pass to notification_spool
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    my $study_dir = $this->{TmpDir}  . "/" .
+        $this->extract_tarchive($tarchive, $tarchive_srcloc, $seriesuid);
     my $ExtractSuffix  = basename($tarchive, ".tar");
     # get rid of the tarchive Prefix 
     $ExtractSuffix =~ s/DCM_(\d){4}-(\d){2}-(\d){2}_//;
     my $info       = "head -n 12 $this->{TmpDir}/${ExtractSuffix}.meta";
     my $header     = `$info`;
-    $this->{LOG}->print("\n$header\n");
+    my $message = "\n$header\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
+
     return ($ExtractSuffix, $study_dir, $header);
 }
 
@@ -150,16 +218,19 @@ sub extractAndParseTarchive {
 ################## determineSubjectID ##########################
 ################################################################
 sub determineSubjectID {
-    
-    my $this = shift;   
+
+    my $this = shift;
     my ($scannerID,$tarchiveInfo,$to_log) = @_;
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
     $to_log = 1 unless defined $to_log;
     if (!defined(&Settings::getSubjectIDs)) {
         if ($to_log) {
             my $message =  "\nERROR: Profile does not contain getSubjectIDs ".
                            "routine. Upload will exit now.\n\n";
-            $this->writeErrorLog($message, 2); 
-            exit 2;
+            $this->writeErrorLog($message, 2);
+	    $this->spool($message, 'Y', $upload_id, $notify_notsummary);
+	    exit 2;
         }
     }
     my $subjectIDsref = Settings::getSubjectIDs(
@@ -169,12 +240,13 @@ sub determineSubjectID {
                             $this->{dbhr}
                         );
     if ($to_log) {
-        $this->{LOG}->print("\n==> Data found for candidate   : ".
-                            $subjectIDsref->{'CandID'} .
-                            "- ". $subjectIDsref->{'PSCID'} . "- Visit: ".
+        my $message = "\n==> Data found for candidate   : ".
+                            "CandID: ". $subjectIDsref->{'CandID'} .
+                            "- PSCID: ". $subjectIDsref->{'PSCID'} . "- Visit: ".
                             $subjectIDsref->{'visitLabel'} . "- Acquired : ".
-                            $tarchiveInfo->{'DateAcquired'} . "\n"
-        );
+                            $tarchiveInfo->{'DateAcquired'} . "\n";
+	$this->{LOG}->print($message);
+        $this->spool($message, 'N', $upload_id, $notify_detailed);
     }
     return $subjectIDsref;
 }
@@ -185,7 +257,7 @@ sub determineSubjectID {
 ################################################################
 
 sub createTarchiveArray {
-    
+
     my $this = shift;
     my %tarchiveInfo;
     my ($tarchive,$globArchiveLocation) = @_;
@@ -201,17 +273,20 @@ sub createTarchiveArray {
     if ($this->{debug}) {
         print $query . "\n";
     }
-    my $sth = ${$this->{'dbhr'}}->prepare($query); 
+    my $sth = ${$this->{'dbhr'}}->prepare($query);
     $sth->execute();
-   
+
     if ($sth->rows > 0) {
         my $tarchiveInfoRef = $sth->fetchrow_hashref();
         %tarchiveInfo = %$tarchiveInfoRef;
     } else {
-        my $message = "\n ERROR: Only archived data can be uploaded.".
+        my $message = "\nERROR: Only archived data can be uploaded.".
                       "This seems not to be a valid archive for this study!".
                       "\n\n";
         $this->writeErrorLog($message, 3);
+	# no $tarchive can be fetched so $upload_id is undef
+	# in the notification_spool
+        $this->spool($message, 'Y', undef, $notify_notsummary);
         exit 3;
     }
 
@@ -221,11 +296,12 @@ sub createTarchiveArray {
 ################################################################
 #################### determinePSC ##############################
 ################################################################
-
 sub determinePSC {
 
     my $this = shift;
     my ($tarchiveInfo,$to_log) = @_;
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = undef;
     $to_log = 1 unless defined $to_log;
     my ($center_name, $centerID) =
     NeuroDB::MRI::getPSC(
@@ -233,17 +309,20 @@ sub determinePSC {
         $this->{dbhr}
     );
     if ($to_log) {
+	$upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
         if (!$center_name) {
-            $this->{LOG}->print(
-                "\nERROR: No center found for this candidate \n\n"
-            );
+
+            my $message = "\nERROR: No center found for this candidate \n\n";
+            $this->writeErrorLog($message, 4);
+	    $this->spool($message, 'Y', $upload_id, $notify_notsummary);
             exit 4;
         }
-        $this->{LOG}->print(
-            "\n==> Verifying acquisition center\n -> " .
-            "Center Name : $center_name\n -> CenterID ".
-            " : $centerID\n"
-        );
+        my $message =
+            "\n==> Verifying acquisition center\n-> " .
+            "Center Name : $center_name\n-> CenterID ".
+            " : $centerID\n";
+	$this->{LOG}->print($message);
+	$this->spool($message, 'N', $upload_id, $notify_detailed);
     }
     return ($center_name, $centerID);
 }
@@ -252,17 +331,20 @@ sub determinePSC {
 ################## determineScannerID ##########################
 ################################################################
 sub determineScannerID {
-    
+
     my $this = shift;
     my ($tarchiveInfo,$to_log,$centerID,$NewScanner) = @_;
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    my $message = '';
     $to_log = 1 unless defined $to_log;
     if ($to_log) {
-        $this->{LOG}->print(
-            "\n\n==> Trying to determine scanner ID\n"
-        );
-    }   
+        $message = "\n\n==> Trying to determine scanner ID\n";
+        $this->{LOG}->print($message);
+        $this->spool($message, 'N', $upload_id, $notify_detailed);
+    }
 
-    my $scannerID = 
+    my $scannerID =
         NeuroDB::MRI::findScannerID(
             $tarchiveInfo->{'ScannerManufacturer'},
             $tarchiveInfo->{'ScannerModel'},
@@ -274,18 +356,19 @@ sub determineScannerID {
         );
     if ($scannerID == 0) {
         if ($to_log) {
-            my $message = "\n ERROR: The ScannerID for this particular scanner ".
+            $message = "\nERROR: The ScannerID for this particular scanner ".
                           "does not exist. Enable creating new ScannerIDs in ".
                           "your profile or this archive can not be ".
                           "uploaded.\n\n";
-            $this->writeErrorLog($message, 5); 
+            $this->writeErrorLog($message, 5);
+       	    $this->spool($message, 'Y', $upload_id, $notify_notsummary);
             exit 5;
         }
     }
-    if ($to_log)  {
-        $this->{LOG}->print(
-            "==> scanner ID : $scannerID\n\n"
-        );
+    if ($to_log) {
+        $message = "==> scanner ID : $scannerID\n\n";
+        $this->{LOG}->print($message);
+        $this->spool($message,'N', $upload_id, $notify_detailed);
     }
     return $scannerID;
 }
@@ -297,11 +380,12 @@ sub determineScannerID {
 sub get_acquisitions {
     my $this = shift;
     my ($study_dir, $acquisitions) = @_;
-    @$acquisitions = 
+    @$acquisitions =
     split("\n", `find $study_dir -type d -name \\*.ACQ`);
-    $this->{LOG}->print(
-        "Acquisitions: ".join("\n", @$acquisitions)."\n"
-    );
+    my $message = "Acquisitions: ".join("\n", @$acquisitions)."\n";
+    if ($this->{verbose}){
+	    $this->{LOG}->print($message);
+    }
 }
 
 ################################################################
@@ -309,18 +393,21 @@ sub get_acquisitions {
 ################################################################
 sub computeMd5Hash {
     my $this = shift;
-    my ($file) = @_;
-    $this->{LOG}->print(
-        "==> computing md5 hash for MINC body.\n"
-    ) if $this->{verbose};
+    my ($file, $tarchive_srcloc) = @_;
+    my $message = '';
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    $message = "\n==> computing md5 hash for MINC body.\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     my $md5hash = &NeuroDB::MRI::compute_hash(\$file);
-    $this->{LOG}->print(
-        " --> md5: $md5hash\n"
-    ) if $this->{verbose};
+    $message = "\n--> md5: $md5hash\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     $file->setParameter('md5hash', $md5hash);
     my $unique = &NeuroDB::MRI::is_unique_hash(\$file);
     return $unique;
 }
+
 ################################################################
 #################### getAcquisitionProtocol ####################
 ################################################################
@@ -328,25 +415,33 @@ sub computeMd5Hash {
 sub getAcquisitionProtocol {
    
     my $this = shift;
-    my ($file,$subjectIDsref,$tarchiveInfo,$center_name,$minc) = @_;
-    
+    my ($file,$subjectIDsref,$tarchiveInfo,$center_name,$minc,$acquisitionProtocol,$bypass_extra_file_checks) = @_;
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    my $message = '';
+
     ############################################################
     ## get acquisition protocol (identify the volume) ##########
     ############################################################
 
-    $this->{LOG}->print(    
-        "==> verifying acquisition protocol\n"
-    ) if $this->{verbose};
-    my $acquisitionProtocol =  &NeuroDB::MRI::identify_scan_db(
+    if(!defined($acquisitionProtocol)) {
+      $message = "\n==> verifying acquisition protocol\n";
+      $this->{LOG}->print($message);
+      $this->spool($message, 'N', $upload_id, $notify_detailed);
+
+      $acquisitionProtocol =  &NeuroDB::MRI::identify_scan_db(
                                    $center_name,
                                    $subjectIDsref,
                                    $file, 
                                    $this->{dbhr}, 
                                    $minc
-                               );
-    $this->{LOG}->print(
-        "Acquisition protocol is $acquisitionProtocol\n"
-    );
+                                 );
+    }
+
+    $message = "\nAcquisition protocol is $acquisitionProtocol\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
+
     my @checks = ();
     my $acquisitionProtocolID;
     if ($acquisitionProtocol !~ /unknown/) {
@@ -354,16 +449,27 @@ sub getAcquisitionProtocol {
         &NeuroDB::MRI::scan_type_text_to_id(
           $acquisitionProtocol, $this->{dbhr}
         );
-        @checks = $this->extra_file_checks(
+
+        if ($bypass_extra_file_checks == 0) {
+          @checks = $this->extra_file_checks(
                         $acquisitionProtocolID, 
                         $file, 
                         $subjectIDsref->{'CandID'}, 
                         $subjectIDsref->{'visitLabel'},
                         $tarchiveInfo->{'PatientName'}
-                  );
-        $this->{LOG}->print(
-            "Worst error: $checks[0]\n"
-        ) if $this->{debug};
+                    );
+          $message = "\nextra_file_checks from table mri_protocol_check " .
+                     "logged in table mri_violations_log: $checks[0]\n";
+	  $this->{LOG}->print($message);
+	  # 'warn' and 'exclude' are errors, while 'pass' is not
+	  # log in the notification_spool_table the $Verbose flag accordingly
+	  if (!($checks[0] eq 'pass')){
+	          $this->spool($message, 'Y', $upload_id, $notify_notsummary);
+	  }
+	  else{
+	          $this->spool($message, 'N', $upload_id, $notify_detailed);
+	  }
+        }
     }
     return ($acquisitionProtocol, $acquisitionProtocolID, @checks);
 }
@@ -453,7 +559,7 @@ sub update_mri_acquisition_dates {
     ############################################################
     my $query = "SELECT s.ID, m.AcquisitionDate FROM session AS s LEFT OUTER".
                 " JOIN mri_acquisition_dates AS m ON (s.ID=m.SessionID)". 
-                " WHERE s.ID='$sessionID' AND".
+                " WHERE s.ID='$sessionID' AND s.Active='Y' AND".
                 " (m.AcquisitionDate > '$acq_date'". 
                 " OR m.AcquisitionDate IS NULL) AND '$acq_date'>0";
     
@@ -481,7 +587,9 @@ sub update_mri_acquisition_dates {
 sub loadAndCreateObjectFile {
 
     my $this = shift;
-    my ($minc) = @_;
+    my ($minc, $tarchive_srcloc) = @_;
+    my $message = '';
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
 
     ############################################################
     ################ create File object ########################
@@ -491,17 +599,17 @@ sub loadAndCreateObjectFile {
     ############################################################
     ########## load File object ################################
     ############################################################
-    $this->{LOG}->print(
-        "\n==> Loading file from disk $minc\n"
-    ) if $this->{verbose};
+    $message = 	"\n==> Loading file from disk $minc\n";
+    $this->{LOG}->print($message); 
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     $file->loadFileFromDisk($minc);
 
     ############################################################
     ############# map dicom fields #############################
     ############################################################
-    $this->{LOG}->print(
-        " --> mapping DICOM parameter for $minc\n"
-    ) if $this->{verbose};
+    $message = "\n--> mapping DICOM parameter for $minc\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     NeuroDB::MRI::mapDicomParameters(\$file);
     return $file;
 }
@@ -513,15 +621,18 @@ sub loadAndCreateObjectFile {
 sub move_minc {
     
     my $this = shift;
-    my ($minc,$subjectIDsref, $minc_type, $fileref,$prefix,$data_dir) = @_;
+    my ($minc,$subjectIDsref, $minc_type, $fileref,
+		$prefix,$data_dir, $tarchive_srcloc) = @_;
     my ($new_name, $version,$cmd,$new_dir,$extension,@exts,$dir);
     my $concat = "";
+    my $message = '';
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
 
     ############################################################
     ### figure out where to put the files ######################
     ############################################################
     $dir = $this->which_directory($subjectIDsref,$data_dir);
-    `mkdir -p -m 755 $dir/native`;
+    `mkdir -p -m 770 $dir/native`;
 
     ############################################################
     ####### figure out what to call files ######################
@@ -549,9 +660,9 @@ sub move_minc {
     $new_name = "$new_dir/$new_name";
     $cmd = "mv $$minc $new_name";
     `$cmd`;
-    $this->{LOG}->print(
-        "File $$minc \n moved to:\n $new_name\n"
-    );
+    $message = "\nFile $$minc \nmoved to:\n$new_name\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     $$minc = $new_name;
     return $new_name;
 }
@@ -569,10 +680,14 @@ sub registerScanIntoDB {
     ) = @_;
     my $data_dir = $Settings::data_dir;
     my $prefix   = $Settings::prefix;
+    my $acquisitionProtocolID = undef;
     my (
-        $acquisitionProtocolID,$Date_taken,$minc_protocol_identified,
+        $Date_taken,$minc_protocol_identified,
         $file_path,$tarchive_path,$fileID
     );
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    my $message = '';
     ############################################################
     # Register scans into the database.  Which protocols to ####
     # keep optionally controlled by the config file. ###########
@@ -595,8 +710,10 @@ sub registerScanIntoDB {
             'AcquisitionProtocolID', 
              $acquisitionProtocolID
         );
-        print "Acq protocol: $acquisitionProtocol ID: $acquisitionProtocolID\n"
-        if $this->{debug};
+        
+        $message = "\nAcq protocol: $acquisitionProtocol " 
+			. "- ID: $acquisitionProtocolID\n";
+        $this->spool($message, 'N', $upload_id, $notify_detailed);
 
         ########################################################
         # set Date_taken = last modification timestamp ######### 
@@ -613,7 +730,8 @@ sub registerScanIntoDB {
                                         $acquisitionProtocol,
                                         $minc_file,
                                         $prefix,
-                                        $data_dir
+                                        $data_dir,
+					$tarchiveInfo->{'SourceLocation'}					
                                      );
 
         ########################################################
@@ -643,18 +761,21 @@ sub registerScanIntoDB {
         ########################################################
         # register into the db fixme if I ever want a dry run ## 
         ########################################################
-        print "Registering file into db\n" if $this->{debug};
+        $message = "\nRegistering file into database\n";
+        $this->spool($message, 'N', $upload_id, $notify_detailed);
         $fileID = &NeuroDB::MRI::register_db($minc_file);
-        print "FileID: $fileID\n" if $this->{debug}
+        $message = "\nFileID: $fileID\n";
+        $this->spool($message, 'N', $upload_id, $notify_detailed);
 
         ########################################################
         ### update mri_acquisition_dates table #################
         ########################################################
-        &$this->update_mri_acquisition_dates(
+        $this->update_mri_acquisition_dates(
             $sessionID, 
             $tarchiveInfo->{'DateAcquired'}
         );
     }
+    return $acquisitionProtocolID;
 }
 
 ################################################################
@@ -664,8 +785,11 @@ sub registerScanIntoDB {
 sub dicom_to_minc {
 
     my $this = shift;
-    my ($study_dir, $converter,$get_dicom_info,$exclude,$mail_user) = @_;
+    my ($study_dir, $converter,$get_dicom_info,
+		$exclude,$mail_user, $tarchive_srcloc) = @_;
     my ($d2m_cmd,$d2m_log,$exit_code);
+    my $message = '';
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
     $d2m_cmd = "find $study_dir -type f | $get_dicom_info -studyuid -series".
                " -echo -image -file -series_descr -attvalue 0018 0024".
                " -stdin | sort -n -k1 -k2 -k6 -k3 -k7 -k4 | grep -iv".
@@ -674,12 +798,11 @@ sub dicom_to_minc {
     ############################################################
     #### use some other converter if specified in the config ###
     ############################################################
-    if ($converter ne 'dcm2mnc') {
+    if ($converter !~ /dcm2mnc/) {
         $d2m_cmd .= "$converter $this->{TmpDir}  -notape -compress -stdin";
     } else {
-        $d2m_cmd .= "dcm2mnc -dname '' -stdin -clobber $this->{TmpDir} ";
+        $d2m_cmd .= "$converter -dname '' -stdin -clobber -usecoordinates $this->{TmpDir} ";
     }
-    print "\n" . $d2m_cmd . "\n";
     $d2m_log = `$d2m_cmd`;
 
     if ($? > 0) {
@@ -688,6 +811,8 @@ sub dicom_to_minc {
         # dicom_to_minc failed...  don't keep going, ########### 
         # just email. ##########################################
         ########################################################
+        $message = "\nDicom to Minc conversion failed\n";
+        $this->spool($message, 'Y', $upload_id, $notify_notsummary);
         open MAIL, "| mail $mail_user";
         print MAIL "Subject: [URGENT Automated] uploadNeuroDB: ".
                    "dicom->minc failed\n";
@@ -695,9 +820,11 @@ sub dicom_to_minc {
         close MAIL;
         croak("dicom_to_minc failure, exit code $exit_code");
    }
-   $this->{LOG}->print(
-       "### Dicom to MINC:\n$d2m_log"
-   );
+
+    $message = "\n" . $d2m_cmd . "\n";
+    $this->{LOG}->print(
+    "### Dicom to MINC:\n$d2m_log");
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
 }
 ################################################################
 ####### get_mincs ##############################################
@@ -706,7 +833,9 @@ sub dicom_to_minc {
 sub get_mincs {
   
     my $this = shift;
-    my ($minc_files) = @_;
+    my ($minc_files, $tarchive_srcloc) = @_;
+    my $message = '';
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
     @$minc_files = ();
     opendir TMPDIR, $this->{TmpDir} ;
     my @files = readdir TMPDIR;
@@ -728,10 +857,10 @@ sub get_mincs {
     }
     close SORTLIST;
     `rm -f $this->{TmpDir}/sortlist`;
-    $this->{LOG}->print(
-        "\n### These MINC files have been created: \n".
-        join("\n", @$minc_files)."\n"
-    );
+    $message = "\n### These MINC files have been created: \n".
+        join("\n", @$minc_files)."\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
 }  
 
 ################################################################
@@ -754,7 +883,7 @@ sub concat_mri {
         print CONCATFILES "$file\n";
     }
     close CONCATFILES;
-    mkdir("$this->{TmpDir} /concat", 0700);
+    mkdir("$this->{TmpDir} /concat", 0770);
     $cmd = "cat $this->{TmpDir} /concatfilelist.txt | concat_mri.pl ".
            "-maxslicesep 3.1 -compress -postfix _concat -targetdir ".
            "$this->{TmpDir} /concat -stdin";
@@ -801,15 +930,19 @@ sub moveAndUpdateTarchive {
     my $this = shift;
     my ($tarchive_location,$tarchiveInfo) = @_;
     my $query = '';
+    my $message = '';
     my ($newTarchiveLocation, $newTarchiveFilename,$mvTarchiveCmd);
-    print "Moving tarchive into library\n" if $this->{debug};
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    $message = "\nMoving tarchive into library\n";
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     $newTarchiveLocation = $Settings::tarchiveLibraryDir."/".
     substr($tarchiveInfo->{'DateAcquired'}, 0, 4);
     ############################################################
     ##### make the directory if it does not yet exist ##########
     ############################################################
     unless(-e $newTarchiveLocation) {
-        mkdir($newTarchiveLocation, 0755);
+        mkdir($newTarchiveLocation, 0770);
     }
     ############################################################
     ####### determine the new name of the tarchive #############
@@ -821,7 +954,8 @@ sub moveAndUpdateTarchive {
     ###### move the tarchive ###################################
     ############################################################
     $mvTarchiveCmd = "mv $tarchive_location $newTarchiveLocation";
-    print $mvTarchiveCmd . "\n"  if $this->{debug};
+    $message = "\n" . $mvTarchiveCmd . "\n";
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     `$mvTarchiveCmd`;
 
     ############################################################
@@ -852,11 +986,16 @@ sub CreateMRICandidates {
     my $query = '';
     my ($subjectIDsref,$gender,$tarchiveInfo,$User,$centerID) = @_;
     my ($message);
+    my $tarchive_srcloc = '';
+    my $upload_id   = undef;
     if ($tarchiveInfo->{'PatientGender'} eq 'F') {
             $gender = "Female";
     } elsif ($tarchiveInfo->{'PatientGender'} eq 'M') {
         $gender = "Male";
     }
+    # get the upload_id from the tarchive_srcloc for notification_spool
+    $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
     ################################################################
     ## Create non-existent candidate if the profile allows for #####
     ## Candidate creation ##########################################
@@ -887,21 +1026,24 @@ sub CreateMRICandidates {
                 print $query . "\n";
             }
             ${$this->{'dbhr'}}->do($query);
-            $this->{LOG}->print( "\n==> CREATED NEW CANDIDATE :
-            $subjectIDsref->{'CandID'}");
-      } elsif ($subjectIDsref->{'CandID'}) {# if the candidate exis
-            $this->{LOG}->print(
-               "\n==> getSubjectIDs returned this CandID/DCCID : ".
-               "$subjectIDsref->{'CandID'}\n"
-            );
+            $message = "\n==> CREATED NEW CANDIDATE :
+            		$subjectIDsref->{'CandID'}";
+            $this->{LOG}->print($message);
+            $this->spool($message, 'N', $upload_id, $notify_detailed);
+      } elsif ($subjectIDsref->{'CandID'}) {# if the candidate exists
+            $message = "\n==> getSubjectIDs returned this CandID/DCCID : ".
+               "$subjectIDsref->{'CandID'}\n";
+	    $this->{LOG}->print($message);
+            $this->spool($message, 'N', $upload_id, $notify_detailed);
       } else {
-            $message = "\n ERROR: The candidate could not be considered for ". 
+            $message = "\nERROR: The candidate could not be considered for ". 
                        "uploading, since s/he is not registered in your database.".
-                       "\n The dicom header PatientID is: ". 
+                       "\nThe dicom header PatientID is: ". 
                        $tarchiveInfo->{'PatientID'}. "\n ".
                        "The dicom header PatientName is: ". 
                        $tarchiveInfo->{'PatientName'}. "\n\n";
             $this->writeErrorLog($message, 6); 
+            $this->spool($message, 'Y', $upload_id, $notify_notsummary);
             exit 6;
      }
 }
@@ -913,6 +1055,9 @@ sub setMRISession {
     my $this = shift;
     my $query = '';
     my ($subjectIDsref, $tarchiveInfo) = @_;
+    my $message = '';
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
     ############################################################
     # This will actually create a visit count if it is not ##### 
     # provided through the IDs in the dicom header The count ### 
@@ -928,7 +1073,9 @@ sub setMRISession {
     ############################################################
     ################## get session ID ##########################
     ############################################################
-    $this->{LOG}->print("\n\n==> Getting session ID\n");
+    $message = "\n==> Getting session ID\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     my ($sessionID, $requiresStaging) =
         NeuroDB::MRI::getSessionID(
             $subjectIDsref, 
@@ -936,8 +1083,9 @@ sub setMRISession {
             $this->{dbhr}, 
             $subjectIDsref->{'subprojectID'}
         );
-
-    $this->{LOG}->print("SessionID: $sessionID\n");    
+    $message = "\nSessionID: $sessionID\n";    
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     # Staging: $requiresStaging\n";
     ############################################################
     # Make sure MRI Scan Done is set to yes, because now ####### 
@@ -960,23 +1108,28 @@ sub setMRISession {
 sub validateArchive {
     my $this = shift;
     my ($tarchive,$tarchiveInfo) = @_;
-    $this->{LOG}->print( "\n==> verifying dicom archive md5sum (checksum)\n");
+    my $tarchive_srcloc = $tarchiveInfo->{'SourceLocation'};
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+    my $message = "\n==> verifying dicom archive md5sum (checksum)\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     my $cmd = "md5sum $tarchive";
-    if ($this->{debug})  {
+    if ($this->{verbose})  {
         print $cmd . "\n";
     }
     my $md5_check = `$cmd`;
     my ($md5_real, $real) = split(' ', $md5_check);
     my ($md5_db  , $db)   = split(' ', $tarchiveInfo->{'md5sumArchive'});
-    $this->{LOG}->print(
-        " -> checksum for target        :  ".
-        "$md5_real\n -> checksum from database :  $md5_db\n"
-    );
+    $message = "\n-> checksum for target        :  ".
+        "$md5_real\n-> checksum from database :  $md5_db\n";
+    $this->{LOG}->print($message);
+    $this->spool($message, 'N', $upload_id, $notify_detailed);
     if ($md5_real ne $md5_db) {
-        my $message =  "\nerror: archive seems to be corrupted or modified. ".
+        $message =  "\nerror: archive seems to be corrupted or modified. ".
                        "upload will exit now.\nplease read the creation logs ".
                        " for more  information!\n\n";
         $this->writeErrorLog($message, 7); 
+        $this->spool($message, 'Y', $upload_id, $notify_notsummary);
         exit 7;
     }
 }
@@ -999,7 +1152,7 @@ sub which_directory {
 
 sub validateCandidate {
     my $this = shift;
-    my ($subjectIDsref)= @_;
+    my ($subjectIDsref, $tarchive_srcloc)= @_;
     my $CandMismatchError = undef;
     
     ############################################################
@@ -1008,15 +1161,15 @@ sub validateCandidate {
     my $query = "SELECT CandID, PSCID FROM candidate WHERE CandID=?";
     my $sth = ${$this->{'dbhr'}}->prepare($query);
     $sth->execute($subjectIDsref->{'CandID'});
-    print "candidate id " . $subjectIDsref->{'CandID'} . "\n";
+    print "candidate id " . $subjectIDsref->{'CandID'} . "\n" 
+	if ($this->{verbose});
     my @CandIDCheck = $sth->fetchrow_array;
     if ($sth->rows == 0) {
-        print LOG  "\n\n => Could not find candidate with CandID =".
+        print LOG  "\n\n=> Could not find candidate with CandID =".
                    " $subjectIDsref->{'CandID'} in database";
         $CandMismatchError = 'CandID does not exist';
         return $CandMismatchError;
     }
-   
     
     ############################################################
     ################ Check if PSCID exists #####################
@@ -1026,11 +1179,10 @@ sub validateCandidate {
     $sth =  ${$this->{'dbhr'}}->prepare($query);
     $sth->execute($subjectIDsref->{'PSCID'});
     if ($sth->rows == 0) {
-        print "\n\n => No PSCID";
+        print "\n\n=> No PSCID";
         $CandMismatchError= 'PSCID does not exist';
         return $CandMismatchError;
     } 
-    
     
     ############################################################
     ################ No Checking if the subject is Phantom #####
@@ -1044,21 +1196,216 @@ sub validateCandidate {
     }
 
     ############################################################
-    ################ Check if visitLabel exists #####################
+    ################ Check if visitLabel exists ################
     ############################################################
 
     $query = "SELECT Visit_label FROM Visit_Windows WHERE BINARY Visit_label=?";
     $sth =  ${$this->{'dbhr'}}->prepare($query);
     $sth->execute($subjectIDsref->{'visitLabel'});
     if (($sth->rows == 0) && (!$subjectIDsref->{'createVisitLabel'})) {
-        print "\n\n => No Visit label";
+        print "\n\n=> No Visit label";
         $CandMismatchError= 'Visit label does not exist';
         return $CandMismatchError;
     } elsif (($sth->rows == 0) && ($subjectIDsref->{'createVisitLabel'})) {
-        print "\n\n => Will create visit label $subjectIDsref->{'visitLabel'}";
+        print "\n\n=> Will create visit label $subjectIDsref->{'visitLabel'}";
     } 
 
    return $CandMismatchError;
 }
+
+################################################################
+#################### computeSNR ################################
+################################################################
+
+sub computeSNR {
+
+    my $this = shift;
+    my ($row, $filename, $fileID, $base, $fullpath, $cmd, $message, $SNR, $SNR_old);
+    my ($tarchiveID, $tarchive_srcloc, $profile)= @_;
+    my $data_dir = $Settings::data_dir;
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+
+    my $query = "SELECT FileID, file from files f ";
+    my $where = "WHERE f.TarchiveSource=?";
+    $query = $query . $where;
+
+    if ($this->{debug}) {
+        print $query . "\n";
+    }
+
+    my $minc_file_arr = ${$this->{'dbhr'}}->prepare($query);
+    $minc_file_arr->execute($tarchiveID);
+
+    while ($row = $minc_file_arr->fetchrow_hashref()) {
+        $filename = $row->{'file'};
+        $fileID = $row->{'FileID'};
+        $base = basename($filename);
+        $fullpath = $data_dir . "/" . $filename;
+        if (defined(&Settings::getSNRModalities)
+            && Settings::getSNRModalities($base)) {
+                $cmd = "noise_estimate --snr $fullpath";
+                $SNR = `$cmd`;
+                $SNR =~ s/\n//g;
+                print "$cmd \n" if ($this->{verbose});
+                print "SNR is: $SNR \n" if ($this->{verbose});
+                my $file = NeuroDB::File->new($this->{dbhr});
+                $file->loadFile($fileID);
+                $SNR_old = $file->getParameter('SNR');
+                if ($SNR ne '') {
+                    if (($SNR_old ne '') && ($SNR_old ne $SNR)) {
+                        $message = "The SNR value will be updated from " .
+                            "$SNR_old to $SNR. \n";
+                        $this->{LOG}->print($message);
+                        $this->spool($message, 'N', $upload_id, $notify_detailed);
+                    }
+                    $file->setParameter('SNR', $SNR);
+                }
+        }
+        else {
+            $message = "The SNR can not be computed for $base. ".
+                "Either the getSNRModalities is not defined in your ".
+                "$profile file, or the imaging modality is not ".
+                "supported by the SNR computation. \n";
+            $this->{LOG}->print($message);
+            $this->spool($message, 'N', $upload_id, $notify_detailed);
+        }
+    }
+}
+
+################################################################
+##########  Order Imaging Modalities By Acquisition ############
+################################################################
+
+sub orderModalitiesByAcq {
+
+    my $this = shift;
+    my ($file, $acqProtID, $dataArr, $message, $sth);
+    my ($tarchiveID, $tarchive_srcloc)= @_;
+    my $upload_id = getUploadIDUsingTarchiveSrcLoc($tarchive_srcloc);
+
+    my $queryAcqProt = "SELECT DISTINCT f.AcquisitionProtocolID ".
+                        "FROM files f ".
+                        "WHERE f.TarchiveSource=?";   
+
+    if ($this->{debug}) {
+        print $queryAcqProt . "\n";
+    }
+
+    my $acqArr = ${$this->{'dbhr'}}->prepare($queryAcqProt);
+    $acqArr->execute($tarchiveID);
+    # For each of the files having this AcquisitionProtocolID
+    # load the file object to get the series_number  
+    while (my $rowAcqProt = $acqArr->fetchrow_hashref()) {
+        $acqProtID = $rowAcqProt->{'AcquisitionProtocolID'};
+        my $queryDataArr = "SELECT f.FileID, f.AcqOrderPerModality ".
+                            "FROM files f ".
+                            "WHERE f.TarchiveSource=? AND f.AcquisitionProtocolID=?";
+
+        if ($this->{debug}) {
+            print $queryDataArr . "\n";
+        }
+
+        $dataArr = ${$this->{'dbhr'}}->prepare($queryDataArr);
+        $dataArr->execute($tarchiveID, $acqProtID);
+        my (@fileIDArr, @seriesNumberArr)=();
+        my $i=0;
+        while (my $rowDataArr = $dataArr->fetchrow_hashref()) {
+            $fileIDArr[$i] = $rowDataArr->{'FileID'};
+            $file = NeuroDB::File->new($this->{dbhr});
+            $file->loadFile($fileIDArr[$i]);
+            $seriesNumberArr[$i] = $file->getParameter('series_number');
+            $i++;
+        }
+        my (@sorted_seriesNumber_indices, @sorted_fileIDArr)=();
+        # Sort the series_number, and assign the Modality Order accordingly
+        @sorted_seriesNumber_indices = sort {$seriesNumberArr[$a] <=> $seriesNumberArr[$b]} (0..$#seriesNumberArr);
+        @sorted_fileIDArr = @fileIDArr[@sorted_seriesNumber_indices];
+
+        my $order = 1;
+        foreach my $j (0..$#seriesNumberArr) {
+            my $update = "UPDATE files f SET f.AcqOrderPerModality=? ".
+                         "WHERE f.FileID=?";
+            if ($this->{debug}) {
+                print $update . "\n";
+            }
+            my $modalityOrder_update = ${$this->{'dbhr'}}->prepare($update);
+            $modalityOrder_update->execute($order, $sorted_fileIDArr[$j]);
+            $message = "The Modality Order for FileID $sorted_fileIDArr[$j] was updated to $order \n ";
+            $this->{LOG}->print($message);
+            $this->spool($message, 'N', $upload_id, $notify_detailed);
+            $order++;
+        }
+    }
+}
+
+################################################################
+################ getUploadIDUsingTarchiveSrcLoc#################
+################################################################
+=pod
+getUploadIDUsingTarchiveSrcLoc()
+Description:
+  - Get upload_id form the mri_upload table using tarchive SourceLocation
+
+Arguments:
+  $tarchive_srcloc: The Tarchive SourceLocation
+
+  Returns: $upload_id : The upload_id from the mri_upload table
+=cut
+
+
+sub getUploadIDUsingTarchiveSrcLoc {
+
+    ############################################################
+    ################ Establish database connection #############
+    ############################################################
+    my $dbh = &NeuroDB::DBI::connect_to_db(@Settings::db);
+
+    my $tarchive_srcloc = shift;
+    my $query = '';
+    my $upload_id = undef;
+
+    if ($tarchive_srcloc) {
+        ########################################################
+        ###Extract upload_id using tarchive source location#####
+        ########################################################
+	$query = "SELECT UploadID FROM mri_upload "
+        	. "WHERE DecompressedLocation =?";
+	my $sth = $dbh->prepare($query);
+     	$sth->execute($tarchive_srcloc);
+        if ( $sth->rows > 0 ) {
+     	   $upload_id = $sth->fetchrow_array;
+        }
+    }
+    return $upload_id;
+}
+
+################################################################
+#################spool##########################################
+################################################################
+=pod
+spool()
+Description:
+   - Calls the Notify->spool function to log all messages
+
+Arguments:
+ $this      : Reference to the class
+ $message   : Message to be logged in the database
+ $error     : if 'Y' it's an error log , 'N' otherwise
+ $upload_id: The upload_id
+ $verb      : 'N' for few main messages, 'Y' for more messages (developers)
+ Returns    : NULL
+=cut
+
+sub spool  {
+    my $this = shift;
+    my ( $message, $error, $upload_id, $verb ) = @_;
+
+    if ($error eq 'Y'){
+ 	print "Spool message is: $message \n";
+    }
+    $this->{'Notify'}->spool('mri upload processing class', $message, 0,
+           'MRIProcessingUtility.pm', $upload_id, $error, $verb);
+}
+
 
 1;

@@ -173,7 +173,7 @@ sub getSessionID {
     my $dbh = $$dbhr;
     
 # find a matching timepoint
-    $query = "SELECT ID, Date_visit, Visit FROM session WHERE CandID=$subjectIDref->{'CandID'} AND LOWER(Visit_label)=LOWER(".$dbh->quote($subjectIDref->{'visitLabel'}).")";
+    $query = "SELECT ID, Date_visit, Visit FROM session WHERE CandID=$subjectIDref->{'CandID'} AND LOWER(Visit_label)=LOWER(".$dbh->quote($subjectIDref->{'visitLabel'}).") AND Active='Y'";
     $sth = $dbh->prepare($query);
     $sth->execute();
 
@@ -271,7 +271,7 @@ sub getSessionID {
 	# check dates of other files
 	if(defined($studyDateJD) and !$noStagingCheck) {
 	    # get the set of sessions for the subject
-	    $query = "SELECT ID FROM session WHERE CandID=$subjectIDref->{'CandID'}";
+	    $query = "SELECT ID FROM session WHERE CandID=$subjectIDref->{'CandID'} AND Active='Y'";
 	    $sth = $dbh->prepare($query);
 	    $sth->execute();
 	    
@@ -500,22 +500,28 @@ sub identify_scan_db {
             print "\n";
         }
         
-        if(($sd_regex && ($series_description =~ /$sd_regex/i)) ||
-           ((!$rowref->{'TR_range'} || &in_range($tr, $rowref->{'TR_range'}))
-	    && (!$rowref->{'TE_range'} || &in_range($te, $rowref->{'TE_range'}))
-	    && (!$rowref->{'TI_range'} || &in_range($ti, $rowref->{'TI_range'}))
-	    && (!$rowref->{'slice_thickness_range'} || &in_range($slice_thickness, $rowref->{'slice_thickness_range'}))
-	    
-	    && (!$rowref->{'xspace_range'} || &in_range($xspace, $rowref->{'xspace_range'}))
-	    && (!$rowref->{'yspace_range'} || &in_range($yspace, $rowref->{'yspace_range'}))
-	    && (!$rowref->{'zspace_range'} || &in_range($zspace, $rowref->{'zspace_range'}))
-	    
-	    && (!$rowref->{'xstep_range'} || &in_range($xstep, $rowref->{'xstep_range'}))
-	    && (!$rowref->{'ystep_range'} || &in_range($ystep, $rowref->{'ystep_range'}))
-	    && (!$rowref->{'zstep_range'} || &in_range($zstep, $rowref->{'zstep_range'}))
-	    && (!$rowref->{'time_range'} || &in_range($time, $rowref->{'time_range'})))) {
-            return &scan_type_id_to_text($rowref->{'Scan_type'}, $dbhr);
-      }
+	if ($sd_regex) {
+            if ($series_description =~ /$sd_regex/i) {
+                return &scan_type_id_to_text($rowref->{'Scan_type'}, $dbhr);
+            }
+	}
+	else {
+         	if ((!$rowref->{'TR_range'} || &in_range($tr, $rowref->{'TR_range'}))
+                && (!$rowref->{'TE_range'} || &in_range($te, $rowref->{'TE_range'}))
+                && (!$rowref->{'TI_range'} || &in_range($ti, $rowref->{'TI_range'}))
+                && (!$rowref->{'slice_thickness_range'} || &in_range($slice_thickness, $rowref->{'slice_thickness_range'}))
+
+                && (!$rowref->{'xspace_range'} || &in_range($xspace, $rowref->{'xspace_range'}))
+                && (!$rowref->{'yspace_range'} || &in_range($yspace, $rowref->{'yspace_range'}))
+                && (!$rowref->{'zspace_range'} || &in_range($zspace, $rowref->{'zspace_range'}))
+
+                && (!$rowref->{'xstep_range'} || &in_range($xstep, $rowref->{'xstep_range'}))
+                && (!$rowref->{'ystep_range'} || &in_range($ystep, $rowref->{'ystep_range'}))
+                && (!$rowref->{'zstep_range'} || &in_range($zstep, $rowref->{'zstep_range'}))
+                && (!$rowref->{'time_range'} || &in_range($time, $rowref->{'time_range'}))) {
+                    return &scan_type_id_to_text($rowref->{'Scan_type'}, $dbhr);
+            }
+        }
     }
 
     # if we got here, we're really clueless...
@@ -712,7 +718,7 @@ sub register_db {
     # build the insert query
     my $query = "INSERT INTO files SET ";
 
-    foreach my $key ('File', 'SessionID','EchoTime', 'CoordinateSpace', 'OutputType', 'AcquisitionProtocolID', 'FileType', 'InsertedByUserID', 'Caveat', 'SeriesUID', 'TarchiveSource','SourcePipeline','PipelineDate','SourceFileID') {
+    foreach my $key ('File', 'SessionID','EchoTime', 'CoordinateSpace', 'OutputType', 'AcquisitionProtocolID', 'FileType', 'InsertedByUserID', 'Caveat', 'SeriesUID', 'TarchiveSource','SourcePipeline','PipelineDate','SourceFileID', 'ScannerID') {
         # add the key=value pair to the query
         $query .= "$key=".$dbh->quote($${fileData{$key}}).", ";
     }
@@ -1118,7 +1124,7 @@ sub make_pics {
     $mincbase =~ s/\.mnc(\.gz)?$//;
 
     my $pic = $dest_dir . '/' . $rowhr->{'CandID'};
-    unless (-e $pic) { system("mkdir -p -m 755 $pic") == 0 or return 0; }
+    unless (-e $pic) { system("mkdir -p -m 770 $pic") == 0 or return 0; }
     my $tmpdir = tempdir( CLEANUP => 1 );
 
     # if the file has a fileid, add that to the filename
@@ -1174,7 +1180,7 @@ sub make_jiv {
     }
 
     # relocate jiv files to jiv destination dir
-    unless (-e $jiv) { system("mkdir -p -m 755 $jiv"); return 0 unless -e $jiv; }
+    unless (-e $jiv) { system("mkdir -p -m 770 $jiv"); return 0 unless -e $jiv; }
     `mv $tempdir/* $jiv/`;
 
     # update mri table
@@ -1204,6 +1210,41 @@ sub make_nii {
 
     # update mri table (parameter_file table)
     $file->setParameter('check_nii_filename', $nifti);
+}
+
+=pod
+Creates pics associated with MINC files
+=cut
+sub make_minc_pics {
+    my ($dbhr, $TarchiveSource, $profile, $minFileID, $debug, $verbose) = @_;
+    my $where = "WHERE TarchiveSource = ? ";
+    my $query = "SELECT Min(FileID) AS min, Max(FileID) as max FROM files ";
+    $query    = $query . $where;
+    if ($debug) {		
+        print $query . "\n";		
+    }
+    my $sth   = $${dbhr}->prepare($query);
+    $sth->execute($TarchiveSource);
+    print "TarchiveSource is " . $TarchiveSource . "\n";
+
+    my $script = undef;
+    my $output = undef;
+    my @row = $sth->fetchrow_array();
+    if (@row) {
+        $script = "mass_pic.pl -minFileID $row[$minFileID] -maxFileID $row[1] ".
+                     "-profile $profile";
+        if ($verbose) {		
+            $script .= " -verbose";		
+	}
+
+        ############################################################
+        ## Note: system call returns the process ID ################
+        ## To get the actual exit value, shift right by eight as ###
+        ## done below ##############################################
+        ############################################################
+        $output = system($script);
+        $output = $output >> 8;
+    }
 }
 
 =pod

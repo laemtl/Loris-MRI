@@ -1,0 +1,241 @@
+#!/usr/bin/perl -w
+use strict;
+use warnings;
+no warnings 'once';
+use File::Basename;
+use Getopt::Tabular;
+use NeuroDB::DBI;
+use NeuroDB::Notify;
+
+my $profile   = '';
+my $upload_id = undef; 
+my $fullpath = undef; 
+my $phantom = undef; 
+my $patientname = undef; 
+my ($debug, $verbose) = (0,1);
+my $stdout = '';
+my $stderr = '';
+
+my @opt_table           = (
+    [ "Basic options", "section" ],
+    [
+        "-profile", "string", 1, \$profile,
+        "name of config file in ../dicom-archive/.loris_mri"
+    ],
+    ["-verbose", "boolean", 1,   \$verbose, "Be verbose."]
+);
+
+my $Help = <<HELP;
+******************************************************************************
+Run imaging_upload_file.pl in batch mode
+******************************************************************************
+
+This script runs the Loris-MRI insertion on multiple scans. The list of scans are 
+provided through a text file (e.g. list_of_scans.txt) with one scan details per line.
+The scan details includes the path to the scan, identification as to whether the
+scan is for a phantom (Y) or not (N), and the candidate name for non-phantom entries.
+
+Like the Loris Imaging Uploader interface, this script also validates the candidate 
+name against the (start of the) filename and creates an entry in the mri_upload table.
+
+An example of what list_of_scans.txt might contain for 3 uploads to be inserted:
+/data/incoming/PSC0001_123457_V1.tar.gz N PSC0000_123456_V1
+/data/incoming/Lego_Phantom_MNI_20140101.zip Y
+/data/incoming/PSC0001_123457_V1_RES.tar.gz N PSC0000_123456_V1
+
+HELP
+my $Usage = <<USAGE;
+usage: ./batch_uploads_imageuploader -profile prod < list_of_scans.txt >log_batch_imageuploader.txt 2>&1 [options]
+       $0 -help to list options
+USAGE
+&Getopt::Tabular::SetHelp( $Help, $Usage );
+&Getopt::Tabular::GetOptions( \@opt_table, \@ARGV ) || exit 1;
+
+################################################################
+################ Get config setting#############################
+################################################################
+{ package Settings; do "$ENV{LORIS_CONFIG}/.loris_mri/$profile" }
+if ( $profile && !@Settings::db ) {
+    print "\n\tERROR: You don't have a
+    configuration file named '$profile' in:
+    $ENV{LORIS_CONFIG}/.loris_mri/ \n\n";
+    exit 2;
+}
+
+if (!$profile ) {
+    print $Help;
+    print "\n$Usage\n";
+    exit 3;
+}
+
+################################################################
+################ Establish database connection #################
+################################################################
+my $dbh = &NeuroDB::DBI::connect_to_db(@Settings::db);
+
+my ($stdoutbase, $stderrbase) = ("$Settings::data_dir/batch_output/imuploadstdout.log", 
+				 "$Settings::data_dir/batch_output/imuploadstderr.log");
+
+
+while($_ = $ARGV[0], /^-/) {
+    shift;
+    last if /^--$/; ## -- ends argument processing
+    if (/^-D/) { $debug++ } ## debug level
+    if (/^-v/) { $verbose++ } ## verbosity
+}
+
+
+## read input from STDIN, store into array @inputs (`find ....... | this_script`)
+my @linearray = ();
+my @resultsarray = ();
+my @patientname = ();
+my @patientnamearray = ();
+my @fullpath = ();
+my @fullpatharray = ();
+my @phantom = ();
+my @phantomarray = ();
+my @submitted = ();
+
+my $counter = 0;
+
+while(my $line = <STDIN>)
+{
+    chomp $line;
+    my @linearray = split(" " , $line);
+    push (@resultsarray, @linearray);
+    @fullpath = $linearray[0];
+    @phantom = $linearray[1];
+    @patientname = $linearray[2];
+    push (@patientnamearray, @patientname);
+    push (@fullpatharray, @fullpath);
+    push (@phantomarray, @phantom);
+}
+close STDIN;
+
+## foreach series, batch magic
+foreach my $input (@resultsarray)
+{
+    $counter++;
+    $stdout = $stdoutbase.$counter;
+    $stderr = $stderrbase.$counter;
+
+    #$stdout = '/dev/null';
+    #$stderr = '/dev/null';
+
+    $fullpath = $fullpatharray[$counter-1];
+    $phantom = $phantomarray[$counter-1];
+    $patientname = $patientnamearray[$counter-1];
+
+    ## Ensure that 
+    ## 1) the uploaded file is of type .tgz or .tar.gz or .zip
+    ## 2) check that input file provides phantom details (Y for phantom, N for real candidates)
+    ## 3) for non-phantoms, the patient name and path entries are identical; this mimics the imaging uploader in the front-end
+    my ($base,$path,$type) = fileparse($fullpath, qr{\..*});
+    if (($type ne '.tgz') && ($type ne '.tar.gz') && ($type ne '.zip')) {
+	print "The file on line $counter is not of type .tgz, tar.gz, or .zip and will not be processed\n";
+	exit(3);
+    }
+    if (($phantom eq '') || (($phantom ne 'N') && ($phantom ne 'Y'))) {
+	print "Make sure the Phantom entry is filled out " .
+	      "with Y if the scan if for a phantom, and N otherwise\n";
+	exit(4);
+    }
+    if ($phantom eq 'N') {
+        if ($patientname ne (substr ($base, 0, length($patientname)))) {
+       	    print "Make sure the patient name $patientname " .
+	          "for non-phantom entries matches the start of the ".
+		  "filename $base in $path\n";
+	    exit(5);
+	}
+    }
+    else {
+        if ($patientname ne '') {
+       	    print "Please leave the patient name blank " .
+	          "for phantom entries\n";
+	    exit(6);
+	}
+	else {
+	    $patientname = 'NULL';
+	}
+    }
+
+    ## Populate the mri_upload table with necessary entries and get an upload_id 
+
+    $upload_id = insertIntoMRIUpload(\$dbh,
+				     $patientname,
+                                     $phantom,
+                                     $fullpath);
+
+    ## this is where the subprocesses are created...  should basically run processor script with study directory as argument.
+    ## processor will do all the real magic
+
+    my $command = "$Settings::bin_dir/uploadNeuroDB/imaging_upload_file.pl "
+		. "-profile $profile -upload_id $upload_id $fullpath";
+    if ($verbose) {
+        $command .= " -verbose";
+    }
+
+    ##if qsub is enabled use it
+    if ($Settings::is_qsub) {
+	     open QSUB, "| qsub -V -e $stderr -o $stdout -N process_imageuploader_${counter}";
+    	 print QSUB $command;
+    	 close QSUB;
+    }
+    ##if qsub is not enabled
+    else {
+	print "Running now the following command: $command\n" if $verbose;
+	system($command);
+    }
+
+     push @submitted, $input;
+}
+open MAIL, "|mail $Settings::mail_user";
+print MAIL "Subject: BATCH_UPLOADS_IMAGEUPLOADER: ".scalar(@submitted)." studies submitted.\n";
+print MAIL join("\n", @submitted)."\n";
+close MAIL;
+
+
+################################################################
+############### insertIntoMRIUpload ############################
+################################################################
+=pod
+insertIntoMRIUpload()
+Description:
+  - Insert into the mri_upload table entries for data coming
+    from batch_upload_imageuploader
+
+Arguments:
+  $patientname: The patient name
+  $phantom : 'Y' if the entry is for a phantom, and 'N' othwrwose
+  $fullpath: Path to the uploaded file
+
+  Returns: $upload_id : The Upload ID
+=cut
+
+
+sub insertIntoMRIUpload {
+
+    my ( $dbhr, $patientname, $phantom, $fullpath ) = @_;
+    my $User = `whoami`;
+
+    my $query = "INSERT INTO mri_upload ".
+                "(UploadedBy, UploadDate, PatientName, ".
+                "IsPhantom, UploadLocation) ".
+                "VALUES (?, now(), ?, ?, ?)";
+    my $mri_upload_insert = $dbh->prepare($query);
+    $mri_upload_insert->execute($User,$patientname,
+                                $phantom, $fullpath);
+
+    my $where = " WHERE mu.UploadLocation =?";
+    $query = "SELECT mu.UploadID FROM mri_upload mu";
+    $query .= $where;
+    my $sth = $dbh->prepare($query);
+    $sth->execute($fullpath);
+    my $upload_id = $sth->fetchrow_array;
+
+    return $upload_id;
+}
+
+## exit 0 for find to consider this -cmd true (in case we ever run it that way...)
+exit(0);
+

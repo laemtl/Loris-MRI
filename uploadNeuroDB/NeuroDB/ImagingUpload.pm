@@ -11,6 +11,12 @@ use NeuroDB::FileDecompress;
 use NeuroDB::Notify;
 use File::Temp qw/ tempdir /;
 
+## Define Constants ##
+my $notify_detailed   = 'Y'; # notification_spool message flag for messages to be displayed 
+                             # with DETAILED OPTION in the front-end/imaging_uploader 
+my $notify_notsummary = 'N'; # notification_spool message flag for messages to be displayed 
+                             # with SUMMARY Option in the front-end/imaging_uploader 
+
 ################################################################
 #####################Constructor ###############################
 ################################################################
@@ -47,8 +53,8 @@ sub new {
     ############### Create a Notify Object #####################
     ############################################################
 
-    my $Notify = NeuroDB::Notify->new( $dbhr );
-    $self->{'Notify'} = $Notify;
+    my $Notify 			    = NeuroDB::Notify->new( $dbhr );
+    $self->{'Notify'} 		    = $Notify;
     $self->{'uploaded_temp_folder'} = $uploaded_temp_folder;
     $self->{'dbhr'}                 = $dbhr;
     $self->{'pname'}                = $pname;
@@ -58,33 +64,34 @@ sub new {
 }
 
 ################################################################
-#####################IsValid####################################
+#####################IsCandidateInfoValid#######################
 ################################################################
 =pod
-IsValid()
+IsCandidateInfoValid()
 Description:
- Validates the File to be upload:
+ Validates the File to be uploaded:
  If the validation passes the following will happen:
   1) Copy the file from tmp folder to the /data/incoming
-  2) Set the isvalidated to true in the mri_upload table
+  2) Set the IsCandidateInfoValidated to true in the 
+     mri_upload table
 
 Arguments:
  $this: reference to the class
 
  Returns: 0 if the validation fails and 1 if passes
 =cut
-sub IsValid {
+sub IsCandidateInfoValid {
     my $this = shift;
     my ($message,$query,$where) = '';
     ############################################################
-    ####Set the Processed to true###############################
+    ####Set the Inserting flag to true##########################
     #Which means that the scan is going through the pipeline####
     ############################################################
     ############################################################
     ###########Update MRI_upload Table accordingly##############
     ############################################################
     $where = " WHERE UploadID=?";
-    $query = " UPDATE mri_upload SET Processed=1";
+    $query = " UPDATE mri_upload SET Inserting=1";
     $query = $query . $where;
     my $mri_upload_update = ${$this->{'dbhr'}}->prepare($query);
     $mri_upload_update->execute($this->{'upload_id'});
@@ -95,13 +102,10 @@ sub IsValid {
     ############################################################
     my $files_not_dicom                   = 0;
     my $files_with_unmatched_patient_name = 0;
-    my $is_valid                          = 0;
+    my $is_candinfovalid                  = 0;
     my @row                               = ();
-
     ############################################################
     ####Get a list of files from the folder#####################
-    ############################################################
-    ############################################################
     #############Loop through the files#########################
     ############################################################
     my @file_list;
@@ -115,7 +119,6 @@ sub IsValid {
     ############################################################
     ############### Check to see if the uploadID exists ########
     ############################################################
-    ############################################################
     $query =
         "SELECT PatientName,TarchiveID,number_of_mincCreated,"
       . "number_of_mincInserted,IsPhantom FROM mri_upload "
@@ -127,26 +130,54 @@ sub IsValid {
     }
     else {
         $message =
-            "\n The uploadID "
+            "\nThe uploadID "
           . $this->{'upload_id'}
-          . "Does Not Exist ";
-        $this->spool($message, 'Y');
+          . " Does Not Exist \n";
+        $this->spool($message, 'Y', $notify_notsummary);
         return 0;
     }
 
     ############################################################
-    ####Check to see if the scan has been ran ##################
+    ####Check to see if the scan has been run ##################
     ####if the tarchiveid or the number_of_mincCreated is set ##
-    ####itt means that has already been ran#####################
+    ####it means that has already been run. ####################
+    ####So the user can continue the insertion by running ######
+    ####tarchiveLoader exactly as the error message indicates ##
     ############################################################
     if ( ( $row[1] ) || ( $row[2] ) ) {
 
+        my $archived_file_path = '';
+        my $query             = "SELECT t.ArchiveLocation FROM tarchive t "
+                              . " WHERE t.TarchiveID =?";
+        my $sth               = ${ $this->{'dbhr'} }->prepare($query);
+        $sth->execute( $row[1] );   
+        if ( $sth->rows > 0 ) {
+            $archived_file_path = $sth->fetchrow_array();
+        }
+
+        unless ($archived_file_path =~ m/$Settings::tarchiveLibraryDir/i) {
+            $archived_file_path = ($Settings::tarchiveLibraryDir . "/" . $archived_file_path);
+        }
+
+        my $command =
+            $Settings::bin_dir
+            . "/uploadNeuroDB/tarchiveLoader"
+            . " -globLocation -profile prod $archived_file_path";
+
+        if ($this->{verbose}){
+            $command .= " -verbose";
+        }
+
         $message =
-            "\n The Scan for the uploadID "
-          . $this->{'upload_id'}
-          . " has already been ran with tarchiveID: "
-          . $row[1];
-        $this->spool($message, 'Y');
+            "\nThe Scan for the uploadID "
+            . $this->{'upload_id'}
+            . " has already been run with tarchiveID: "
+            . $row[1]
+            . ". \nTo continue with the rest of the insertion pipeline, "
+            . "please run tarchiveLoader from a terminal as follows: "
+            . $command 
+            . "\n";
+        $this->spool($message, 'Y', $notify_notsummary);
         return 0;
     }
 
@@ -156,43 +187,45 @@ sub IsValid {
         #1) Check to see if the file is of type DICOM###########
         #2) Check to see if the header matches the patient-name#
         ########################################################
-        if ( ( $_ ne '.' ) && ( $_ ne '..' ) ) {
+        if ( ( $_ ne '.' ) && ( $_ ne '..' ) && (basename($_) ne '.DS_Store')) {
             if ( !$this->isDicom($_) ) {
                 $files_not_dicom++;
             }
+    	    else {
          #######################################################
          #Validate the Patient-Name, only if it's not a phantom#
+         ############## and the file is of type DICOM###########
          #######################################################
-	    if ($row[4] eq 'N') {
-            	if ( !$this->PatientNameMatch($_) ) {
-	        	$files_with_unmatched_patient_name++;
-	        }
-
-	    }
+                if ($row[4] eq 'N') {
+                    if ( !$this->PatientNameMatch($_) ) {
+                            $files_with_unmatched_patient_name++;
+                    }
+                }
+            }
         }
     }
 
     if ( $files_not_dicom > 0 ) {
-        $message = "\n ERROR: there are $files_not_dicom files which are "
-          . "Are not of type DICOM";
-        $this->spool($message, 'Y');
+        $message = "\nERROR: There are $files_not_dicom file(s) which"
+          . " are not of type DICOM \n";
+        $this->spool($message, 'Y', $notify_notsummary);
         return 0;
     }
 
     if ( $files_with_unmatched_patient_name > 0 ) {
         $message =
-            "\n ERROR: there are $files_with_unmatched_patient_name files"
-          . " where the patient-name doesn't match ";
-        $this->spool($message, 'Y');
+            "\nERROR: There are $files_with_unmatched_patient_name file(s)"
+          . " where the patient-name doesn't match \n";
+        $this->spool($message, 'Y', $notify_notsummary);
         return 0;
     }
 
     ############################################################
     ###############Update the MRI_upload table and##############
-    ###############set the isValidated to true##################
+    #########set the IsCandidatInfoValidated to true############
     ############################################################
     $where = " WHERE UploadID=?";
-    $query = "UPDATE mri_upload SET IsValidated=1";
+    $query = "UPDATE mri_upload SET IsCandidateInfoValidated=1";
     $query = $query . $where;
     $mri_upload_update = ${ $this->{'dbhr'} }->prepare($query);
     $mri_upload_update->execute( $this->{'upload_id'} );
@@ -217,7 +250,7 @@ Arguments:
 =cut
 sub runDicomTar {
     my $this              = shift;
-    my $tarchive_id       = '';
+    my $tarchive_id       = undef;
     my $query             = '';
     my $where             = '';
     my $tarchive_location = $Settings::tarchiveLibraryDir;
@@ -226,6 +259,9 @@ sub runDicomTar {
     my $command =
         $dicomtar . " " . $this->{'uploaded_temp_folder'} 
       . " $tarchive_location -clobber -database -profile prod";
+    if ($this->{verbose}) {
+        $command .= " -verbose";
+    }
     my $output = $this->runCommandWithExitCode($command);
 
     if ( $output == 0 ) {
@@ -283,7 +319,6 @@ sub getTarchiveFileLocation {
     unless ($archive_location =~ m/$Settings::tarchiveLibraryDir/i) {
         $archive_location = ($Settings::tarchiveLibraryDir . "/" . $archive_location);
     }
-
     return $archive_location;
 }
 
@@ -309,6 +344,10 @@ sub runTarchiveLoader {
         $Settings::bin_dir
       . "/uploadNeuroDB/tarchiveLoader"
       . " -globLocation -profile prod $archived_file_path";
+
+    if ($this->{verbose}){
+        $command .= " -verbose";
+    }
     my $output = $this->runCommandWithExitCode($command);
     if ( $output == 0 ) {
         return 1;
@@ -340,18 +379,19 @@ sub PatientNameMatch {
     my $this         = shift;
     my ($dicom_file) = @_;
     my $cmd          = "dcmdump $dicom_file | grep PatientName";
-
-    my $patient_name_string = $this->runCommand($cmd);
+    my $patient_name_string =  `$cmd`;
     if (!($patient_name_string)) {
-	    my $message = "the patientname cannot be extracted";
-        $this->spool($message, 'Y');
+	my $message = "\nThe patient name cannot be extracted \n";
+        $this->spool($message, 'Y', $notify_notsummary);
         exit 1;
     }
     my ($l,$pname,$t) = split /\[(.*?)\]/, $patient_name_string;
-    if ($pname ne  $this->{'pname'}) {
-        my $message = "The patient-name $pname does not Match " .
-            $this->{'pname'};
-    $this->spool($message, 'Y');
+    if ($pname !~ /^$this->{'pname'}/) {
+        my $message = "\nThe patient-name $pname read ".
+                      "from the DICOM header does not start with " .
+        	      $this->{'pname'} . 
+                      " from the mri_upload table\n";
+    	$this->spool($message, 'Y', $notify_notsummary);
         return 0; ##return false
     }
     return 1;     ##return true
@@ -376,42 +416,14 @@ Arguments:
 sub isDicom {
     my $this         = shift;
     my ($dicom_file) = @_;
-    my $file_type    = $this->runCommand("file $dicom_file");
+    my $cmd    = "file $dicom_file";
+    my $file_type    = `$cmd`;
     if ( !( $file_type =~ /DICOM/ ) ) {
-        print "not of type DICOM" if $this->{'verbose'};
+        print "\n $dicom_file is not of type DICOM \n";
         return 0;
     }
     return 1;
 }
-
-################################################################
-###############################moveUploadedFile#################
-################################################################
-=pod
-moveUploadedFile()
-Description:
-   - Moves the uploaded file from the uploaded_temp_folder to 
-     Incoming directory
-
-Arguments:
- $this      : Reference to the class
-
- Returns    : NULL
-=cut
-
-sub moveUploadedFile {
-    my $this            = shift;
-    my $incoming_folder = $Settings::getIncomingDir;
-    if (!$incoming_folder) {
-        return 0;
-    }
-    my $cmd = "mv " . $this->{'uploaded_temp_folder'} . 
-	      " " . $incoming_folder;
-    $this->runCommand($cmd);
-}
-
-
-
 
 ################################################################
 ####################sourceEnvironment###########################
@@ -454,7 +466,7 @@ Arguments:
 sub runCommandWithExitCode {
     my $this = shift;
     my ($command) = @_;
-    print "\n\n $command \n\n " if $this->{'verbose'};
+    print "\n$command \n " if $this->{'verbose'};
     my $output = system($command);
     return $output >> 8;    ##returns the exit code
 }
@@ -478,33 +490,62 @@ Arguments:
 sub runCommand {
     my $this = shift;
     my ($command) = @_;
-    print "\n\n $command \n\n " if $this->{'verbose'};
+    print "\n$command \n " if $this->{verbose};
     return `$command`;
 }
 
 ################################################################
-#############################CleanUpTMPDir######################
+####################CleanUpDataIncomingDir######################
 ################################################################
 =pod
-CleanUpTMPDir()
+CleanUpDataIncomingDir()
 Description:
-   - Cleans Up and removes the uploaded TMP file/directory 
-     once it is moved by the moveUploadedFile() function
+   - Cleans Up and removes the uploaded file from the data  
+     directory once it is inserted into the database
 
 Arguments:
  $this      : Reference to the class
 
- Returns    : NULL
+Returns: 1 if the uploaded file removal was successful and 0 otherwise
+
 =cut
 
-sub CleanUpTMPDir {
+sub CleanUpDataIncomingDir {
     my $this = shift;
+    my ($uploaded_file) = @_;
+    my $output = undef;
+    my $message = '';
+    my $tarchive_location = $Settings::tarchiveLibraryDir;
     ############################################################
-    ####Removes the uploaded directory if exists################
+    ################ Removes the uploaded file ################# 
+    ##### Check first that the file is in the tarchive dir ##### 
     ############################################################
-    if ( -d $this->{'uploaded_temp_folder'} ) {
-        rmdir( $this->{'uploaded_temp_folder'} );
+
+    my $base_decompressed_loc = basename($this->{'uploaded_temp_folder'}); 
+    my $command = "find " . $tarchive_location . "/ " . "-name *" . 
+		   $base_decompressed_loc . "*";
+    my $tarchive_file = $this->runCommand($command);
+    if ($tarchive_file) {
+        $message =
+            "\nThe following file " . $tarchive_file . " was found\n";
+        $this->spool($message, 'N', $notify_detailed);
+        $command = "rm " . $uploaded_file;
+        my $output = $this->runCommandWithExitCode($command);
+        if (!$output) {
+            return 1;
+        }
+        $message =
+            "\nUnable to remove the file:" . $uploaded_file . "\n";
+        $this->spool($message, 'Y', $notify_notsummary);
+        return 0;
     }
+    else {
+        $message =
+            "\nThe file " . $tarchive_file . " can not be found\n";
+        $this->spool($message, 'Y', $notify_notsummary);
+        return 0; # if the file was not found in tarchive, do not delete the original
+    }
+
 }
 
 
@@ -520,15 +561,19 @@ Arguments:
  $this      : Reference to the class
  $message   : Message to be logged in the database 
  $error     : if 'Y' it's an error log , 'N' otherwise
+ $verb      : 'N' for few main messages, 'Y' for more messages (developers)
  Returns    : NULL
 =cut
 
 sub spool  {
     my $this = shift;
-    my ( $message, $error ) = @_;
-    print "message is $message \n";
+    my ( $message, $error, $verb ) = @_;
+
+    if ($error eq 'Y'){
+        print "Spool message is: $message \n";
+    }
     $this->{'Notify'}->spool('mri upload processing class', $message, 0,
-           'Imaging_Upload.pm', $this->{'upload_id'},$error);
+           'ImagingUpload.pm', $this->{'upload_id'},$error,$verb);
 }
 
 
@@ -551,7 +596,7 @@ sub updateMRIUploadTable  {
     my $this = shift;
 
     my ( $field, $value ) = @_;
-    ########################################################
+	########################################################
         #################Update MRI_upload table accordingly####
         ########################################################
         my $where = "WHERE UploadID=?";

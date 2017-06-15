@@ -26,12 +26,12 @@ my $date        = sprintf(
                     "%4d-%02d-%02d %02d:%02d:%02d",
                     $year+1900,$mon+1,$mday,$hour,$min,$sec
                   );
-my $debug       = 1 ;  
+my $debug       = 0 ;  
 my $where       = '';
 my $sth         = undef;
 my $query       = '';
 my $message     = '';
-my $verbose     = 1;           # default for now
+my $verbose     = 0;           # default, overwritten if scripts are run with -verbose
 my $profile     = undef;       # this should never be set unless you are in a
                                # stable production environment
 my $reckless    = 0;           # this is only for playing and testing. Don't
@@ -59,7 +59,12 @@ my @opt_table = (
                  ["-newScanner", "boolean", 1, \$NewScanner, "By default a". 
                   " new scanner will be registered if the data you upload".
                   " requires it. You can risk turning it off."],
-                 ["Fancy options","section"]
+
+                 ["Fancy options","section"],
+
+                 ["General options","section"],
+                 ["-verbose", "boolean", 1, \$verbose, "Be verbose."],
+
                  );
 
 my $Help = <<HELP;
@@ -91,7 +96,7 @@ The program does the following validation
 
 - Optionally do extra filtering on the dicom data, if needed
 
-- Finally the isValid is set true in the MRI_Upload table
+- Finally the isTarchiveValidated is set true in the MRI_Upload table
 
 HELP
 my $Usage = <<USAGE;
@@ -134,7 +139,7 @@ my @temp     = split(/\//, $TmpDir);
 my $templog  = $temp[$#temp];
 my $LogDir   = "$data_dir/logs"; 
 if (!-d $LogDir) { 
-    mkdir($LogDir, 0700); 
+    mkdir($LogDir, 0770); 
 }
 my $logfile  = "$LogDir/$templog.log";
 open LOG, ">>", $logfile or die "Error Opening $logfile";
@@ -205,8 +210,8 @@ if ($tarchiveid_count==0)  {
        ##otherwise insert it####################################
        #########################################################
        $query = "INSERT INTO mri_upload (UploadedBy, ".
-                "UploadDate,TarchiveID, DecompressedLocation, IsTarchiveValidated)" .
-                " VALUES (?,now(),?,?,'1')";
+                "UploadDate,TarchiveID, DecompressedLocation)" .
+                " VALUES (?,now(),?,?)";
        my $mri_upload_inserts = $dbh->prepare($query);
        $mri_upload_inserts->execute(
            $User,
@@ -235,7 +240,7 @@ my ($center_name, $centerID) =
 ################################################################
 ################################################################
 my $scannerID = $utility->determineScannerID(
-                    \%tarchiveInfo,0,
+                    \%tarchiveInfo,1,
                     $centerID,$NewScanner
                 );
 
@@ -268,9 +273,11 @@ $utility->CreateMRICandidates(
 ## correct here. ###############################################
 ################################################################
 ################################################################
-my $CandMismatchError= $utility->validateCandidate($subjectIDsref);
+my $CandMismatchError= $utility->validateCandidate(
+				$subjectIDsref,
+				$tarchiveInfo{'SourceLocation'});
 if (defined $CandMismatchError) {
-    print $CandMismatchError;
+    print "$CandMismatchError \n";
     ##Note that the script will not exit, so that further down
     ##it can be inserted per minc into the MRICandidateErrors
 }
@@ -285,7 +292,8 @@ my ($sessionID, $requiresStaging) =
 ### The uploader ###############################################
 ################################################################
 my ($ExtractSuffix,$study_dir,$header) = 
-    $utility->extractAndParseTarchive($tarchive);
+    $utility->extractAndParseTarchive(
+                $tarchive, $tarchiveInfo{'SourceLocation'});
 
 ################################################################
 # Optionally do extra filtering on the dicom data, if needed ###
@@ -295,15 +303,13 @@ if ( defined( &Settings::dicomFilter )) {
 }
 
 ################################################################
-### Update the mri_upload table with the correct tarchiveID ####
+##Update the IsTarchiveValidated flag in the mri_upload table ##
 ################################################################
-if ($tarchiveid_count!=0) {
-    $where = "WHERE TarchiveID=?";
-    $query = "UPDATE mri_upload SET IsTarchiveValidated='1' ";
-    $query = $query . $where;
-    my $mri_upload_update = $dbh->prepare($query);
-    $mri_upload_update->execute($tarchiveInfo{TarchiveID});
-}
+$where = "WHERE TarchiveID=?";
+$query = "UPDATE mri_upload SET IsTarchiveValidated='1' ";
+$query = $query . $where;
+my $mri_upload_update = $dbh->prepare($query);
+$mri_upload_update->execute($tarchiveInfo{TarchiveID});
 
 
 exit 0;

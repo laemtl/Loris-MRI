@@ -88,7 +88,7 @@ my  $prefix     =   $Settings::prefix;
 
 # Needed for log file
 my  $log_dir    =   "$data_dir/logs/registerProcessed";
-system("mkdir -p -m 755 $log_dir") unless (-e $log_dir);
+system("mkdir -p -m 770 $log_dir") unless (-e $log_dir);
 my  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)    =   localtime(time);
 my  $date       =   sprintf("%4d-%02d-%02d_%02d:%02d:%02d",$year+1900,$mon+1,$mday,$hour,$min,$sec);
 my  $log        =   "$log_dir/registerProcessed$date.log";
@@ -168,7 +168,7 @@ if  (!defined($scannerID))  {
     print LOG "\nERROR: could not determine scannerID based on sourceFileID $sourceFileID.\n\n";
     exit 2;
 }
-$file->setParameter('ScannerID',$scannerID);
+$file->setFileData('ScannerID',$scannerID);
 print LOG "\t -> Set ScannerID to $scannerID.\n";
 
 
@@ -302,16 +302,15 @@ sub getSessionID    {
 
 
 =pod
-This function gets ScannerID from parameter_file using sourceFileID
+This function gets ScannerID from files using sourceFileID
 =cut
 sub getScannerID    {
     my  ($sourceFileID,$dbh)    =   @_;    
 
     my $scannerID;
-    my $query   =   "SELECT pf.Value AS ScannerID " .
-                    "FROM parameter_file AS pf " .
-                    "JOIN parameter_type AS pt ON (pt.ParameterTypeID=pf.ParameterTypeID) " .
-                    "WHERE pt.Name='ScannerID' AND pf.FileID=?";
+    my $query   =   "SELECT f.ScannerID AS ScannerID " .
+                    "FROM files AS f " .
+                    "WHERE f.FileID=?";
     my $sth     =   $dbh->prepare($query);
     $sth->execute($sourceFileID);
     if($sth->rows > 0) {
@@ -373,7 +372,7 @@ sub copy_file {
 
     # figure out where to put the files
     my $dir         =   &which_directory($subjectIDsref);
-    `mkdir -p -m 755 $dir/processed/$sourcePipeline`;
+    `mkdir -p -m 770 $dir/processed/$sourcePipeline`;
 
     # figure out what to call files
     my @exts        =   split(/\./, basename($$filename));

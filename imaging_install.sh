@@ -13,6 +13,15 @@ LOGFILE="/tmp/$(basename $0).$$.tmp"
 touch $LOGFILE
 trap "rm  $LOGFILE" EXIT
  
+if [[ -n $(which mincheader) ]]; then
+    echo ""
+    echo "MINC Toolkit appears to be installed."
+else
+    echo ""
+    echo "MINC Toolkit does not appear to be installed. Please see http://www.bic.mni.mcgill.ca/ServicesSoftware/MINC. Aborting."
+    exit 2;
+fi
+MINC_TOOLKIT_DIR=`which mincheader|sed s#/bin/mincheader##`
 
 #First, check that all required modules are installed.
 #Check if cpan module installed
@@ -57,20 +66,21 @@ mridir=`pwd`
 #read -p "Enter Full Loris-code directory path "   lorisdir
 
 ################################################################################################
-########################################MINC TOOL###############################################
+#####################################DICOM TOOLKIT##############################################
 ################################################################################################
-echo "Installing Minc toolkit (May prompt for sudo password)"
-sudo -S apt-get install minc-tools
-echo
-
-echo "Installing dicom toolkit (May prompt for sudo password)"
-sudo -S apt-get install dcmtk
+os_distro=$(lsb_release -si)
+if [ $os_distro  = "CentOS" ]; then
+    echo "You are running CentOS. Please also see Loris-MRI Readme for notes and links to further documentation in our main GitHub Wiki on how to install the DICOM Toolkit and other required dependencies."
+else
+    echo "Installing DICOM Toolkit (May prompt for sudo password)"
+    sudo -S apt-get install dcmtk
+fi
 echo
 
 #################################################################################################
 ############################INSTALL THE PERL LIBRARIES###########################################
 #################################################################################################
-echo "Installing the perl libraries...THis will take a few minutes..."
+echo "Installing the perl libraries...This will take a few minutes..."
 #echo $rootpass | sudo perl -MCPAN -e shell
 sudo -S cpan install Math::Round
 #echo $rootpass | sudo -S cpan install Bundle::CPAN
@@ -85,24 +95,24 @@ echo
 #############################Create directories########################################
 #######################################################################################
 echo "Creating the data directories"
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/"
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/trashbin"         #holds mincs that didn't match protocol
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/tarchive"         #holds tared dicom-folder
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/pic"              #holds jpegs generated for the MRI-browser
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/logs"             #holds logs from pipeline script
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/jiv"              #holds JIVs used for JIV viewer
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/assembly"         #holds the MINC files
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/batch_output"     #contains the result of the SGE (queue
-  sudo -S su $USER -c "mkdir -p $mridir/dicom-archive/.loris_mri"
+  sudo -S su $USER -c "mkdir -m 2770 -p /data/$PROJ/data/"
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/trashbin"         #holds mincs that didn't match protocol
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/tarchive"         #holds tared dicom-folder
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/pic"              #holds jpegs generated for the MRI-browser
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/logs"             #holds logs from pipeline script
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/jiv"              #holds JIVs used for JIV viewer
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/assembly"         #holds the MINC files
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/batch_output"     #contains the result of the SGE (queue
+  sudo -S su $USER -c "mkdir -m 770 -p $mridir/dicom-archive/.loris_mri"
 echo
 
 #####################################################################################
 ###############incoming directory using sites########################################
 #####################################################################################
-sudo -S su $USER -c "mkdir -p /data/incoming/"
+sudo -S su $USER -c "mkdir -m 2770 -p /data/incoming/"
 echo "Creating incoming director(y/ies)"
  for s in $site; do 
-  sudo -S su $USER -c "mkdir -p /data/incoming/$s/incoming"
+  sudo -S su $USER -c "mkdir -m 770 -p /data/incoming/$s/incoming"
  done
 echo
 
@@ -111,19 +121,10 @@ echo
 ###################################################################################
 echo "Modifying environment script"
 sed -i "s#%PROJECT%#$PROJ#g" $mridir/environment
+sed -i "s#%MINC_TOOLKIT_DIR%#$MINC_TOOLKIT_DIR#g" $mridir/environment
 #Make sure that CIVET stuff are placed in the right place
 #source /data/$PROJ/bin/$mridirname/environment
 export TMPDIR=/tmp
-echo
-
-####################################################################################
-######################change permissions ###########################################
-####################################################################################
-#echo "Changing permissions"
-
-sudo chmod -R 750 $mridir/dicom-archive/.loris_mri/
-sudo chmod -R 750 /data/$PROJ/
-sudo chmod -R 750 /data/incoming/
 echo
 
 ####################################################################################
@@ -142,9 +143,27 @@ else
     read -p "Cannot find the apache group name for your installation. Please provide? " group
 fi
 
-#Setting group permissions 
-sudo chgrp $group -R /data/$PROJ/data/
+####################################################################################
+######################change permissions ###########################################
+####################################################################################
+#echo "Changing permissions"
+
+sudo chmod -R 770 $mridir/dicom-archive/.loris_mri/
+sudo chmod -R 770 /data/$PROJ/
+sudo chmod -R 770 /data/incoming/
+
+# Making lorisadmin part of the apache group
+sudo usermod -a -G $group $USER
+
+#Setting group permissions for all files/dirs under /data/$PROJ/ and /data/incoming/
+sudo chgrp $group -R /data/$PROJ/
 sudo chgrp $group -R /data/incoming/
+
+#Setting group ID for all files/dirs under /data/$PROJ/data
+sudo chmod -R g+s /data/$PROJ/data/
+
+#Setting group ID for all files/dirs under /data/incoming
+sudo chmod -R g+s /data/incoming/
 echo
 
 #####################################################################################
@@ -154,6 +173,7 @@ echo "Creating MRI config file"
 
 cp $mridir/dicom-archive/profileTemplate $mridir/dicom-archive/.loris_mri/$prodfilename
 sudo chmod 640 $mridir/dicom-archive/.loris_mri/$prodfilename
+sudo chgrp $group $mridir/dicom-archive/.loris_mri/$prodfilename
 
 sed -e "s#project#$PROJ#g" -e "s#/PATH/TO/DATA/location#/data/$PROJ/data#g" -e "s#/PATH/TO/BIN/location#$mridir#g" -e "s#yourname\\\@example.com#$email#g" -e "s#/PATH/TO/get_dicom_info.pl#$mridir/dicom-archive/get_dicom_info.pl#g"  -e "s#DBNAME#$mysqldb#g" -e "s#DBUSER#$mysqluser#g" -e "s#DBPASS#$mysqlpass#g" -e "s#DBHOST#$mysqlhost#g" -e "s#/PATH/TO/dicomlib/#/data/$PROJ/data/tarchive#g" $mridir/dicom-archive/profileTemplate > $mridir/dicom-archive/.loris_mri/$prodfilename
 echo "config file is located at $mridir/dicom-archive/.loris_mri/$prodfilename"

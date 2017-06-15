@@ -1,10 +1,19 @@
 #!/bin/bash
 
 ##################################
+# This script is not actively maintained. 
+# and has not been supported since 15.10
+##################################
+echo "NOTE: Mac is no longer supported as of 15.10."
+echo "This script is not actively maintained."
+echo 
+
+##################################
 ###WHAT THIS SCRIPT WILL NOT DO###
 #1)It doesn't set up the SGE
 #2)It doesn't fetch the CIVET stuff   TODO:Get the CIVET stuff from somewhere and place somewhere
 #3)It doesn't change the config.xml
+#4)It doesn't install DICOM toolkit
 
 
 #Create a temporary log for installation and delete it on completion 
@@ -36,23 +45,24 @@ mridir=`pwd`
 #############################Create directories######################################
 #####################################################################################
 echo "Creating the data directories"
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/"
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/trashbin"          #holds mincs that didn't match protocol
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/tarchive"          #holds tared dicom-folder
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/pic"               #holds jpegs generated for the MRI-browser
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/logs"              #holds logs from pipeline script
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/jiv"               #holds JIVs used for JIV viewer
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/assembly"          #holds the MINC files
-  sudo -S su $USER -c "mkdir -p /data/$PROJ/data/batch_output"      #contains the result of the SGE (queue
-  sudo -S su $USER -c "mkdir -p $mridir/dicom-archive/.loris_mri"
+  sudo -S su $USER -c "mkdir -m 2770 -p /data/$PROJ/data/"
+  sudo -S su $USER -c "chmod g+s /data/$PROJ/data/"
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/trashbin"          #holds mincs that didn't match protocol
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/tarchive"          #holds tared dicom-folder
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/pic"               #holds jpegs generated for the MRI-browser
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/logs"              #holds logs from pipeline script
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/jiv"               #holds JIVs used for JIV viewer
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/assembly"          #holds the MINC files
+  sudo -S su $USER -c "mkdir -m 770 -p /data/$PROJ/data/batch_output"      #contains the result of the SGE (queue
+  sudo -S su $USER -c "mkdir -m 770 -p $mridir/dicom-archive/.loris_mri"
 echo
 #####################################################################################
 ###############incoming directory using sites########################################
 #####################################################################################
-sudo -S su $USER -c "mkdir -p /data/incoming/";
+sudo -S su $USER -c "mkdir -m 2770 -p /data/incoming/";
 echo "Creating incoming director(y/ies)"
  for s in $site; do 
-  sudo -S su $USER -c "mkdir -p /data/incoming/$s/incoming";
+  sudo -S su $USER -c "mkdir -m 770 -p /data/incoming/$s/incoming";
  done;
 echo
 
@@ -67,13 +77,42 @@ export TMPDIR=/tmp
 echo
 
 ####################################################################################
+######################Add the proper Apache group user #############################
+####################################################################################
+if egrep ^www-data: /etc/group > $LOGFILE 2>&1;
+then 
+    group=www-data
+elif egrep ^www: /etc/group  > $LOGFILE 2>&1;
+then
+    group=www
+elif egrep -e ^apache: /etc/group  > $LOGFILE 2>&1;
+then
+    group=apache
+else
+    read -p "Cannot find the apache group name for your installation. Please provide? " group
+fi
+
+####################################################################################
 ######################change permissions ###########################################
 ####################################################################################
 #echo "Changing permissions"
 
-sudo chmod -R 750 $mridir/.loris_mri/
-sudo chmod -R 750 /data/$PROJ/
-sudo chmod -R 750 /data/incoming/
+sudo chmod -R 770 $mridir/.loris_mri/
+sudo chmod -R 770 /data/$PROJ/
+sudo chmod -R 770 /data/incoming/
+
+# Making lorisadmin part of the apache group
+sudo usermod -a -G $group $USER
+
+#Setting group permissions for all files/dirs under /data/$PROJ/ and /data/incoming/
+sudo chgrp $group -R /data/$PROJ/
+sudo chgrp $group -R /data/incoming/
+
+#Setting group ID for all files/dirs under /data/$PROJ/data
+sudo chmod -R g+s /data/$PROJ/data/
+
+#Setting group ID for all files/dirs under /data/incoming
+sudo chmod -R g+s /data/incoming/
 echo
 
 #####################################################################################
@@ -83,6 +122,7 @@ echo "Creating MRI config file"
 
 cp $mridir/dicom-archive/profileTemplate $mridir/dicom-archive/.loris_mri/$prodfilename
 sudo chmod 640 $mridir/dicom-archive/.loris_mri/$prodfilename
+sudo chgrp $group $mridir/dicom-archive/.loris_mri/$prodfilename
 
 sed -e "s#project#$PROJ#g" -e "s#/PATH/TO/DATA/location#/data/$PROJ/data#g" -e "s#yourname\\\@example.com#$email#g" -e "s#/PATH/TO/get_dicom_info.pl#$mridir/dicom-archive/get_dicom_info.pl#g"  -e "s#DBNAME#$mysqldb#g" -e "s#DBUSER#$mysqluser#g" -e "s#DBPASS#$mysqlpass#g" -e "s#DBHOST#$mysqlhost#g" -e "s#/PATH/TO/dicomlib/#/data/$PROJ/data/tarchive#g" $mridir/dicom-archive/profileTemplate > $mridir/dicom-archive/.loris_mri/$prodfilename
 echo "config file is located at $mridir/dicom-archive/.loris_mri/$prodfilename"
