@@ -26,6 +26,7 @@ use Date::Parse;
 use MNI::Startup        qw(nocputimes);
 use MNI::Spawn;
 use MNI::FileUtilities  qw(check_output_dirs);
+use experimental 'smartmatch'; #to remove warning that smartmatch is experimental at line 153
 
 @ISA        = qw(Exporter);
 
@@ -120,7 +121,7 @@ sub getAnatFile {
     if (@$anat_list == 0) { 
         return undef; 
     } else { 
-        my $anat    = @sorted_anat[$anat_index];
+        my $anat    = $sorted_anat[$anat_index];
         return $anat;
     }
 }
@@ -413,7 +414,7 @@ sub determineDTIPrepPostprocOutputs {
 
     # Determine input files that were used to obtain the processed file
     my $QCed_minc   = $DTIrefs->{$dti_file}->{'Preproc'}->{'QCed'}->{'minc'};
-    foreach my $proc (keys ($DTIrefs->{$dti_file}->{'Postproc'})) {
+    foreach my $proc (keys (%{$DTIrefs->{$dti_file}->{'Postproc'}})) {
         $DTIrefs->{$dti_file}->{'Postproc'}->{$proc}->{'inputs'}->{'QCed'}  = $QCed_minc;
     }
 }    
@@ -449,7 +450,7 @@ sub determineMincdiffusionPostprocOutputs {
 
     # Determine input files of processed files
     my $QCed_minc = $DTIrefs->{$dti_file}->{'Preproc'}->{'QCed'}->{'minc'};
-    foreach my $proc (keys ($DTIrefs->{$dti_file}->{'Postproc'})) {
+    foreach my $proc (keys (%{$DTIrefs->{$dti_file}->{'Postproc'}})) {
         # All processed files had raw anat file as input
         $DTIrefs->{$dti_file}->{'Postproc'}->{$proc}->{'inputs'}->{'Raw_t1'}    = $anat;
         unless ($proc eq "anat_mask") {
@@ -1005,7 +1006,7 @@ sub getRejectedDirections   {
     $tot_grads  = $slice_excl = $grads_excl = $lace_excl = $tot_excl = 0;
     my (@rm_slice, @rm_interlace, @rm_intergrads);
 
-    foreach my $key (keys $outXMLrefs->{"entry"}{"DWI Check"}{'entry'}) {
+    foreach my $key (keys %{$outXMLrefs->{"entry"}{"DWI Check"}{'entry'}}) {
         # Next unless this is a gradient
         next unless ($key =~ /^gradient_/);
 
