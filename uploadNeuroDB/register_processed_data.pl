@@ -146,23 +146,24 @@ if  ($file->getFileDatum('FileType') eq 'mnc')  {
 #                   - on mincheader information if minc file
 #                   - on sourceFileID for other type of files
 my $scannerID;
+$scannerID  =   getScannerID($sourceFileID,$dbh);
 
-if  ($file->getFileDatum('FileType') eq 'mnc')  {
-    my  %scannerInfo;
-    my  $register_new   =   0;  # This does not allow to register new sanner since files are supposed to be children from files (and scanner)  already entered in the database. Should add it as an option? 
-    $scannerInfo{'ScannerManufacturer'}     =   fetchMincHeader($filename,'study:manufacturer');
-    $scannerInfo{'ScannerModel'}            =   fetchMincHeader($filename,'study:device_model');
-    $scannerInfo{'ScannerSerialNumber'}     =   fetchMincHeader($filename,'study:serial_no');
-    $scannerInfo{'ScannerSoftwareVersion'}  =   fetchMincHeader($filename,'study:software_version');
-    $scannerID  =   NeuroDB::MRI::findScannerID($scannerInfo{'ScannerManufacturer'},
-                                                $scannerInfo{'ScannerModel'},
-                                                $scannerInfo{'ScannerSerialNumber'},
-                                                $scannerInfo{'ScannerSoftwareVersion'},
-                                                $centerID,\$dbh,0
-                                                );
-}else   {
-    $scannerID  =   getScannerID($sourceFileID,$dbh);
-}
+#if  ($file->getFileDatum('FileType') eq 'mnc')  {
+#    my  %scannerInfo;
+#    my  $register_new   =   0;  # This does not allow to register new sanner since files are supposed to be children from files (and scanner)  already entered in the database. Should add it as an option? 
+#    $scannerInfo{'ScannerManufacturer'}     =   fetchMincHeader($filename,'study:manufacturer');
+#    $scannerInfo{'ScannerModel'}            =   fetchMincHeader($filename,'study:device_model');
+#    $scannerInfo{'ScannerSerialNumber'}     =   fetchMincHeader($filename,'study:serial_no');
+#    $scannerInfo{'ScannerSoftwareVersion'}  =   fetchMincHeader($filename,'study:software_version');
+#    $scannerID  =   NeuroDB::MRI::findScannerID($scannerInfo{'ScannerManufacturer'},
+#                                                $scannerInfo{'ScannerModel'},
+#                                                $scannerInfo{'ScannerSerialNumber'},
+#                                                $scannerInfo{'ScannerSoftwareVersion'},
+#                                                $centerID,\$dbh,0
+#                                                );
+#}else   {
+#    $scannerID  =   getScannerID($sourceFileID,$dbh);
+#}
 
 if  (!defined($scannerID))  {
     print LOG "\nERROR: could not determine scannerID based on sourceFileID $sourceFileID.\n\n";
