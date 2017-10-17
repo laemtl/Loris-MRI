@@ -59,8 +59,16 @@ if (!$DTIvisu_subdir) {
     exit 33;
 }
 
+
+# Establish database connection
+my  $dbh    =   &DB::DBI::connect_to_db(@Settings::db);
+
+# These settings are in the ConfigSettings tables
+my  $data_dir    =  &DB::DBI::getConfigSetting(
+                        \$dbh, 'dataDirBasepath'
+                    );
+
 # Needed for log file
-my  $data_dir    =  $Settings::data_dir;
 my  $log_dir     =  "$data_dir/logs/DTI_visualQC_register";
 system("mkdir -p -m 755 $log_dir") unless (-e $log_dir);
 my  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime(time);
@@ -68,14 +76,8 @@ my  $date        =  sprintf("%4d-%02d-%02d_%02d:%02d:%02d",$year+1900,$mon+1,$md
 my  $log         =  "$log_dir/DTI_visualQC_register_$date.log";
 open(LOG,">>$log");
 print LOG "Log file, $date\n\n";
-
-# Establish database connection
-my  $dbh    =   &DB::DBI::connect_to_db(@Settings::db);
 print LOG "\n==> Successfully connected to database \n";
-
 print LOG "\n==> DTI output directory is: $DTIvisu_subdir\n";
-
-
 
     #######################
     ####### Step 1: #######  Get the list of output files to register

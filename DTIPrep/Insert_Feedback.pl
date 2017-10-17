@@ -58,8 +58,23 @@ unless ($noRegQCedDTIname && $registeredFinalnoRegQCedDTI && $qcnotes){
     print "$Usage\n\tERROR: You must specify a -noRegQCedDTI, -FinalnoRegQCedDTI and -qcnotes option.\n\n";
 }
 
+
+
+# Establish database connection
+my  $dbh    =   &DB::DBI::connect_to_db(@Settings::db);
+
+my ($success) = &insertFeedbacks($noRegQCedDTIname,
+                                 $registeredFinalnoRegQCedDTI,
+                                 $qcnotes,
+                                 $dbh
+                                );
+
+# These settings are in the ConfigSettings table
+my  $data_dir    =  &DB::DBI::getConfigSetting(
+                        \$dbh, 'dataDirBasepath'
+                    );
+
 # Needed for log file
-my  $data_dir    =  $Settings::data_dir;
 my  $log_dir     =  "$data_dir/logs/DTI_visualQC_register";
 system("mkdir -p -m 755 $log_dir") unless (-e $log_dir);
 my  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime(time);
@@ -67,17 +82,8 @@ my  $date        =  sprintf("%4d-%02d-%02d_%02d:%02d:%02d",$year+1900,$mon+1,$md
 my  $log         =  "$log_dir/DTI_visualQC_feedback_insertion_$date.log";
 open(LOG,">>$log");
 print LOG "Log file, $date\n\n";
-
-
-# Establish database connection
-my  $dbh    =   &DB::DBI::connect_to_db(@Settings::db);
 print LOG "\n==> Successfully connected to database \n";
 
-my ($success) = &insertFeedbacks($noRegQCedDTIname,
-                                 $registeredFinalnoRegQCedDTI,
-                                 $qcnotes,
-                                 $dbh
-                                );
 
 my $yeah_mess = "\nAll feedbacks were correctly inserted into DB!!\n";
 my $fail_mess = "\nERROR: some feedbacks could not be inserted. Check log above to see what failed.\n";
