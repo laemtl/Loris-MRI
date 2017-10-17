@@ -5,6 +5,7 @@ use File::Basename;
 use File::Temp qw/ tempdir /;
 use File::Path qw/ make_path/;
 use FindBin;
+use DB::DBI;
 
 
 
@@ -45,10 +46,20 @@ USAGE
 if ($profile && !@Settings::db) { print "\n\tERROR: You don't have a configuration file named '$profile' in:  $ENV{LORIS_CONFIG}/.loris_mri \n\n"; exit 33; }
 if(!$tarchive || !$pattern || !$profile) { print $Help; print "$Usage\n\tERROR: You must specify a valid tarchive, a pattern to grep for in the DICOMs and an existing profile.\n\n";  exit 33;  }
 
-# These settings are in a config file (profile)
-my $data_dir            = $Settings::data_dir;
-my $tarchiveLibraryDir  = $Settings::tarchiveLibraryDir;
-my $mail_user           = $Settings::mail_user;
+
+# Establish database connection
+my  $dbh    =   &DB::DBI::connect_to_db(@Settings::db);
+
+# These settings are in the ConfigSettings table
+my $data_dir            = &DB::DBI::getConfigSetting(
+                            \$dbh,'dataDirBasepath'
+                          );
+my $tarchiveLibraryDir  = &DB::DBI::getConfigSetting(
+                            \$dbh,'tarchiveLibraryDir'
+                          );
+my $mail_user           = &DB::DBI::getConfigSetting(
+                            \$dbh,'mail_user'
+                          );
 my $template            = "TarGrep-$hour-$min-XXXXXX"; # for tempdir
 
 # Check that tarchive file exists
