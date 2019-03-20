@@ -68,8 +68,8 @@ INSERT INTO mri_protocol
   ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="NeuromelT1"),      600,      "10",     NULL,     1.8,                   NULL,       NULL ),
   ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="axialFLAIR"),      6000,     "356",    2200,     3,                     NULL,       NULL ),
   ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="QSM"),             20,       "7-8",    NULL,     1,                     NULL,       NULL ),
-  ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="meFieldmapEcho1"), 20,       "4-5",    NULL,     1,                     NULL,       NULL ),
-  ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="meFieldmapEcho2"), 20,       "9-10",   NULL,     1,                     NULL,       NULL ),
-  ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="meFieldmapEcho3"), 20,       "15",     NULL,     1,                     NULL,       NULL );
+  ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="meFieldmapEcho1"), 20,       "4-5",    NULL,     4,                     NULL,       NULL ),
+  ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="meFieldmapEcho2"), 20,       "9-10",   NULL,     4,                     NULL,       NULL ),
+  ( "ZZZZ",      0          (SELECT ID FROM mri_scan_type WHERE Scan_type="meFieldmapEcho3"), 20,       "15",     NULL,     4,                     NULL,       NULL );
 
 -- add a check in MRI protocol check to make sure the PA and AP are respected for dwiAPb0 >  
