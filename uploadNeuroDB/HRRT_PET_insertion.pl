@@ -580,7 +580,7 @@ sub run_hrrt_archival {
 
     my $tar_cmd = "tar -C $to_tar_dir -czf $final_target $study_dir";
     print "\nCreating a tar with the following command: \n $tar_cmd\n" if $verbose;
-    system($tar_cmd);
+    #system($tar_cmd);
     my $blake2bArchive = NeuroDB::Utilities::blake2b_hash($final_target);
 
 

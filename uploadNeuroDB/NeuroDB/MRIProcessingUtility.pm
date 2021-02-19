@@ -171,12 +171,15 @@ INPUTS:
 
 sub writeErrorLog {
     my $this = shift;
-    my ($message, $failStatus,$LogDir) = @_;
+    my ($message, $failStatus, $LogDir) = @_;
     print STDERR $message;
     $this->{LOG}->print($message);
-    $this->{LOG}->print(
-        "program exit status: $failStatus"
-    );
+
+    if (defined($failStatus)) {
+        $this->{LOG}->print(
+            "program exit status: $failStatus"
+        );
+    }
     `cat $this->{logfile}  >> $this->{LogDir}/error.log`;
     close $this->{LOG};
     `rm -f $this->{logfile} `;
@@ -463,7 +466,7 @@ sub createTarchiveArray {
     if ($hrrt) {
 
         my %tarchiveInfo;
-        my ($query = <<QUERY) =~ s/\n/ /gm;
+        (my $query = <<QUERY) =~ s/\n/ /gm;
         SELECT
           PatientName,    CenterName,      DateAcquired,
           Blake2bArchive, ArchiveLocation, HrrtArchiveID
@@ -472,9 +475,11 @@ sub createTarchiveArray {
         WHERE
           ArchiveLocation LIKE ?
 QUERY
+
         if ($this->{debug}) {
             print $query . "\n";
         }
+
         my $sth = ${$this->{'dbhr'}}->prepare($query);
         $sth->execute("'%".basename($tarchive)."%'");
 
