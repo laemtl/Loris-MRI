@@ -88,7 +88,7 @@ class Candidate:
             #   2. try extracting alias from pscid
             #   3. try finding previous site in candidate table
 
-            if 'site' in row and row['site'].lower() not in ("null", ""):
+            if 'site' in row and row['site']:
                 # search site id in psc table by its full name
                 site_info = db.pselect(
                     "SELECT CenterID FROM psc WHERE Name = %s",
@@ -113,11 +113,18 @@ class Candidate:
                 if len(candidate_site_project) > 0:
                     self.center_id = candidate_site_project[0]['RegistrationCenterID']
 
+            if not self.center_id:
+                print("ERROR: could not determine site for " + self.psc_id + "."
+                  + " Please check that your psc table contains a site with an"
+                  + " alias matching the BIDS participant_id or a name matching the site mentioned in"
+                  + " participants.tsv's site column")
+                sys.exit(lib.exitcode.PROJECT_CUSTOMIZATION_FAILURE)
+
             # two steps to find project:
             #   1. find full name in 'project' column in participants.tsv
             #   2. find previous in candidate table
 
-            if 'project' in row and row['project'].lower() not in ("null", ""):
+            if 'project' in row and row['project']:
                 # search project id in Project table by its full name
                 project_info = db.pselect(
                     "SELECT ProjectID FROM Project WHERE Name = %s",
@@ -134,13 +141,6 @@ class Candidate:
                 )
                 if len(candidate_site_project) > 0:
                     self.center_id = candidate_site_project[0]['RegistrationProjectID']
-
-        if not self.center_id:
-            print("ERROR: could not determine site for " + self.psc_id + "."
-                  + " Please check that your psc table contains a site with an"
-                  + " alias matching the BIDS participant_id or a name matching the site mentioned in"
-                  + " participants.tsv's site column")
-            sys.exit(lib.exitcode.PROJECT_CUSTOMIZATION_FAILURE)
 
         if not self.project_id:
             print("ERROR: could not determine project for " + self.psc_id + "."

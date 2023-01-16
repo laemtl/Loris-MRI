@@ -30,8 +30,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     for path in args.files:
         eeg = mne_eeglab._check_load_mat(path, None)
-        eeglab_info = mne_eeglab._get_info(eeg)
-        channel_names = eeglab_info[0]['ch_names']
+
+        channel_names = list()
+        for chanloc in eeg.chanlocs:
+            channel_names.append(chanloc['labels'])
 
         if args.channel_index < 0:
             sys.exit("Channel index must be a positive integer")

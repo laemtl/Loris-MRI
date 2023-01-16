@@ -1,6 +1,6 @@
 mne
 mne-bids>=0.6
-protobuf>=3.0.0
+protobuf>=3.0.0,<=3.20
 pybids==0.14.0
 mysqlclient
 mysql-connector
